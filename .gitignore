@@ -1,0 +1,7 @@
+venv/
+__pycache__/
+*.pyc
+agent.log
+agent.pid
+profiles/*.json
+!profiles/*.example.json

@@ -1,0 +1,75 @@
+{
+  "name": "mac",
+  "asr": {
+    "kind": "parakeet-mlx",
+    "model": "mlx-community/parakeet-tdt-0.6b-v3"
+  },
+  "brain": {
+    "url": "http://127.0.0.1:8091/v1",
+    "model": "nvidia-nemotron-3.5-bolt",
+    "system": "You are a friendly voice assistant. You are speaking out loud: answer in one to three short spoken sentences, plain words, no lists, no markdown, no emoji. If you did not catch something, ask. Start every reply with your mood in square brackets, one of [neutral] [happy] [excited] [curious] [thinking] [surprised] [concerned] [sad] [playful], then the words you say. You have a back agent with tools and skills. Add [deep] after the mood, and say only one short sentence that you are on it, when the request needs: doing something on the computer (checking status, files, messages, searching the web, reminders), up-to-date facts, careful thought, planning, a story or script, maths, code, or more than three sentences. Never say you cannot do something the back agent could do; hand it over instead.",
+    "extra": {
+      "max_tokens": 200,
+      "temperature": 0.7,
+      "chat_template_kwargs": {
+        "enable_thinking": false
+      }
+    }
+  },
+  "voice": {
+    "url": "http://127.0.0.1:8098/v1",
+    "model": "drama-3",
+    "sample_rate": 44100,
+    "chunks": {
+      "first_words": 5
+    },
+    "voice": "vesper",
+    "samples": "~/voices/mac"
+  },
+  "turn": {
+    "end_silence_ms": 400,
+    "start_speech_ms": 64,
+    "barge_in_ms": 192,
+    "preroll_ms": 256,
+    "eager_silence_ms": 160
+  },
+  "eyes": {
+    "url": "http://127.0.0.1:8099/v1",
+    "model": "cosmos3"
+  },
+  "memory": {
+    "url": "http://127.0.0.1:3870",
+    "captioner": {
+      "url": "http://127.0.0.1:8099/v1",
+      "model": "cosmos3"
+    },
+    "interval_s": 3
+  },
+  "agents": {
+    "hermes": {
+      "kind": "acp",
+      "label": "Hermes",
+      "command": [
+        "hermes",
+        "acp"
+      ],
+      "cwd": "~",
+      "permissions": "ask"
+    },
+    "deep": {
+      "kind": "direct",
+      "label": "Deep model",
+      "url": "http://127.0.0.1:8188/v1",
+      "model": "your-model",
+      "system": "You are the deeper mind behind a voice assistant. Your words are spoken aloud right after the assistant said it is thinking it through, so go straight to the answer: at most six short spoken sentences, plain words, no lists, no markdown, no emoji, no tags.",
+      "extra": {
+        "max_tokens": 400,
+        "temperature": 0.7,
+        "chat_template_kwargs": {
+          "enable_thinking": false
+        }
+      }
+    }
+  },
+  "agent": "hermes"
+}

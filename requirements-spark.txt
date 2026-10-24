@@ -1,0 +1,3 @@
+-r requirements.txt
+# speech recognition on CUDA (install a CUDA 13 build of PyTorch for aarch64 first)
+nemo_toolkit[asr]>=3.0

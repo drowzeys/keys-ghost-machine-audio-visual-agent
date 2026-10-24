@@ -1,0 +1,18 @@
+--- a/src/server.js
++++ b/src/server.js
+@@ -149,6 +149,15 @@
+   ok(res, entry);
+ });
+ 
++/** How many days the log keeps (1 to 7), set while running; anything older is pruned at once. */
++app.post('/api/retention', (req, res) => {
++  const days = Number((req.body || {}).days);
++  if (!Number.isFinite(days) || days < 1 || days > 7) return bad(res, 400, 'days must be 1 to 7.');
++  log.retentionDays = days;
++  config.vision.retentionDays = days;
++  ok(res, { days, pruned: log.prune() });
++});
++
+ /** Caption an image via the configured vision backend, and record it. */
+ app.post('/api/vision-caption', async (req, res) => {
+   const { image, prompt, record = true } = req.body || {};
