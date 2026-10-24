@@ -123,8 +123,15 @@ questions in real time, two passes each.
 4. **Back agent (optional).** The example profile starts `hermes acp` locally. To use one on another machine, set its
    `command` to `["ssh", "-T", "user@host", "hermes", "acp"]`. The `deep` agent is any OpenAI-compatible endpoint.
 
-`python -m voice_agent.bench ws://127.0.0.1:8095/ws a.wav b.wav …` measures voice-to-voice with your own recordings
-(16 kHz mono WAV).
+`python -m voice_agent.bench ws://127.0.0.1:8095/ws a.wav b.wav …` measures voice-to-voice from spoken questions as
+16 kHz mono WAV files. No recordings ship with the repository; make test questions with a synthetic Drama 3 voice, for
+example:
+
+```sh
+curl -s http://127.0.0.1:8098/v1/audio/speech -H 'Content-Type: application/json' \
+  -d '{"model": "drama-3", "voice": "oliver", "input": "What is the weather like today?", "response_format": "wav"}' -o q.wav
+ffmpeg -y -i q.wav -ac 1 -ar 16000 a.wav
+```
 
 ## Profiles
 
