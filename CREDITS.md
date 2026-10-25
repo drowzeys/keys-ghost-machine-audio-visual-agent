@@ -19,6 +19,10 @@ below keeps its own licence.
   third parties need a separate licence from Fish Audio.
 - **TensorFold** by [Ash Hart](https://github.com/ashhart/TensorFold) (Apache-2.0): the engine for Bolt, Drama 3 and
   Cosmos3-Edge, on the Mac's GPU (Metal) and on a DGX Spark (CUDA).
+  The prebuilt builds in this repository's releases are unofficial builds of TensorFold 1.1.4 (source:
+  [drowzeys/TensorFold](https://github.com/drowzeys/TensorFold)); the DGX Spark's Drama 3 engine is
+  [plotarmordev's NVFP4 Drama fork](https://github.com/plotarmordev/TensorFold) (branch `drama-nvfp4`) with our
+  voice-prefix cache. The Docker image is built on NVIDIA's PyTorch container (`nvcr.io/nvidia/pytorch:26.07-py3`).
 
 ## Eyes and memory
 

@@ -77,14 +77,14 @@ Rules that make it behave:
 ## Measured speed
 
 Voice-to-voice is the end of your speech to the first sound of the reply, measured by a client streaming 16 recorded
-questions in real time, two passes each.
+questions in real time, three passes each, on TensorFold 1.1.4.
 
 | Measure | Mac (M5 Ultra) | DGX Spark |
 |---|---|---|
-| Voice-to-voice, median | 0.51 / 0.57 s | 0.92 / 0.95 s |
+| Voice-to-voice, median | 0.47–0.60 s | 0.55–0.77 s |
 | Speech recognition (Parakeet v3) | 72 ms | 86 ms |
-| Drama 3 first audio, named voice | 108 ms | ≈ 500 ms (see Limitations) |
-| Cosmos3 camera answer, first token / full | 78 ms / 0.25 s | 100 ms / 0.32 s |
+| Drama 3 first audio, named voice (Vesper) | 122 ms | 121 ms |
+| Cosmos3 camera answer, first token / full | 79 ms / 0.25 s | 103 ms / 0.33 s |
 | Camera question, voice starts | 0.37–0.46 s | 0.60–0.73 s |
 | Left / right question, voice starts | 0.26–0.31 s | 0.55–0.74 s |
 | Live fact (search or weather), voice starts | 1.3–3.8 s | ≈ 2.6 s |
@@ -99,6 +99,34 @@ questions in real time, two passes each.
 - **Camera scan**: how often the camera is captioned into memory while the camera is on: every 1, 2, 3 (default), 5,
   10 or 30 seconds, or every 1, 5 or 15 minutes.
 - **Memory**: how long captions are kept: 1, 2 (default), 3 or 5 days, or 1 week.
+
+## Prebuilt builds
+
+The [v0.1.0 release](https://github.com/drowzeys/keys-ghost-machine-audio-visual-agent/releases/tag/v0.1.0) has
+unofficial community builds of TensorFold 1.1.4 with everything Boo needs that upstream does not ship yet:
+
+- `keys-boo-tensorfold-1.1.4-macos-arm64.tar.gz`: one `tensorfold-native` for Apple silicon that serves Nemotron 3.5
+  Bolt (with `libbolt.dylib`), Drama 3 NVFP4 with named voices and the voice-prefix cache, and Cosmos3-Edge on Metal.
+- `keys-boo-tensorfold-1.1.4-linux-aarch64.tar.gz`: for a DGX Spark, `tensorfold-cosmos3` (Cosmos3-Edge on CUDA) and
+  `tensorfold-drama3-nvfp4` (Drama 3 NVFP4 with the voice-prefix cache). Bolt uses the stock
+  [TensorFold 1.1.4](https://github.com/ashhart/TensorFold/releases/tag/v1.1.4) release.
+
+Each archive has its own README with run commands, a change list, the licences and `SHA256SUMS`. The source is
+[drowzeys/TensorFold](https://github.com/drowzeys/TensorFold), branches `bolt-metal-114`, `drama3-metal-voices-114`,
+`cosmos3-metal-114`, `cosmos3-cuda-114` and `drama3-cuda-voices`.
+
+**Docker (DGX Spark):** the whole Spark stack in one image, without model weights
+(about 25 GB, built on NVIDIA's PyTorch container):
+
+```sh
+docker pull ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:0.1.0
+docker run --gpus all --rm -p 8095:8095 \
+  -v ~/models/bolt:/models/bolt -v ~/models/drama:/models/drama -v ~/models/cosmos3:/models/cosmos3 \
+  -v ~/models/hf-cache:/models/hf-cache -e KAI=1 \
+  ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:0.1.0
+```
+
+Mounts and settings are in [docker/README.md](docker/README.md).
 
 ## Setup
 
@@ -148,13 +176,13 @@ A profile names each engine and the turn timing:
 ## Limitations
 
 - **Cosmos3-Edge on TensorFold** needs the Cosmos3 ports (a new Metal model family and its CUDA counterpart), which are
-  not in TensorFold's upstream releases yet. Without them, point `eyes` and `memory.captioner` at any OpenAI-compatible
-  vision model that accepts PNG images.
+  not in TensorFold's upstream releases yet; use the [prebuilt builds](#prebuilt-builds). Without them, point `eyes`
+  and `memory.captioner` at any OpenAI-compatible vision model that accepts PNG images.
 - **Drama 3 on the Mac** in the measured setup uses Metal changes offered upstream in
   [plotarmordev/TensorFold #1](https://github.com/plotarmordev/TensorFold/pull/1) (prompt rows) and
   [#2](https://github.com/plotarmordev/TensorFold/pull/2) (NVFP4 pruned experts), plus a voice prefix cache. The
-  **DGX Spark** runs Drama 3 with [plotarmordev's TensorFold fork](https://github.com/plotarmordev/TensorFold); its
-  first audio in a named voice is slower than the Mac's until the same prompt and voice-cache changes land there.
+  **DGX Spark** runs Drama 3 with [plotarmordev's TensorFold fork](https://github.com/plotarmordev/TensorFold) plus
+  the same voice-prefix cache; stock TensorFold 1.1.4 does not load the NVFP4 pruned checkpoint yet.
 - Free-form camera descriptions ("describe what you see") can still name a side wrongly; questions about a side go
   through the reliable path above.
 - Live facts come from web search snippets, which can be out of date; ask the back agent for anything that needs
