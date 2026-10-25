@@ -233,7 +233,26 @@ class Voice:
 
     async def stream(self, text: str, voice: str | None = None) -> AsyncIterator[bytes]:
         """int16 mono PCM at ``sample_rate``, chunk by chunk as the engine decodes it, in ``voice`` (a named reference
-        voice keeps one speaker across requests; the built-in voice picks a new one for every sentence)."""
+        voice keeps one speaker across requests; the built-in voice picks a new one for every sentence).
+
+        Drama 3 sometimes stalls after a sentence: the rest is silence or a flat hum under -30 dBFS until the frame cap
+        (TensorFold 1.1.4's silence guard ends such a stream instead, but never redraws it). The same text stalls every
+        time, since its seed comes from the prompt, so a stalled take's quiet tail is dropped and the text it most likely
+        left unsaid is asked for again, at most twice."""
+
+        for attempt in range(3):
+            stalled: list[float] = []
+            async for pcm in self.take(text, voice, stalled):
+                yield pcm
+            if not stalled:
+                return
+            text = unspoken(text, stalled[0], attempt)
+            if not text:
+                return
+
+    async def take(self, text: str, voice: str | None, stalled: list[float]) -> AsyncIterator[bytes]:
+        """One request. Quiet after the first second of speech is held back until speech resumes; STALL_S of it ends
+        the take, and the seconds spoken before it go into ``stalled``."""
 
         body = {"model": self.model, "input": text, "response_format": "pcm", "stream": True}
         if voice:
@@ -248,15 +267,54 @@ class Voice:
             # about 0.08 s a character, so audio far past that is cut off
             limit = int(self.sample_rate * (2.0 + 0.15 * len(text))) * 2
             sent = 0
+            window = self.sample_rate // 20 * 2  # 50 ms, in bytes
+            seconds = heard = 0.0  # audio so far; where the last speech ended
+            held = b""
             async for chunk in reply.aiter_bytes():
                 chunk = carry + chunk
                 cut = len(chunk) - len(chunk) % 2  # whole samples only
                 carry = chunk[cut:]
-                if cut:
-                    sent += cut
-                    yield chunk[:cut]
+                out = b""
+                for i in range(0, cut, window):
+                    piece = chunk[i : min(i + window, cut)]
+                    seconds += len(piece) / 2 / self.sample_rate
+                    if loud(piece):
+                        heard = seconds
+                    elif heard >= 1.0:
+                        held += piece
+                        continue
+                    out, held = out + held + piece, b""
+                if out:
+                    sent += len(out)
+                    yield out
+                if heard >= 1.0 and seconds - heard >= STALL_S:
+                    stalled.append(heard)
+                    return
                 if sent >= limit:
                     return
+            if held:
+                yield held
+
+
+STALL_S = 3.0  # quiet that means a stalled take; Drama 3's own pauses run up to about 2.4 s
+QUIET = 32768 * 10 ** (-30 / 20)  # -30 dBFS: under it is silence or the stall's hum (about -36 dBFS)
+
+
+def loud(pcm: bytes) -> bool:
+    x = np.frombuffer(pcm, dtype=np.int16).astype(np.float32)
+    return bool(x.size) and float(np.sqrt(np.mean(x * x))) >= QUIET
+
+
+def unspoken(text: str, heard: float, attempt: int, per_second: float = 14.0) -> str:
+    """What a take that stalled after ``heard`` seconds of speech most likely left unsaid: the text after the sentence
+    end nearest to where that much speech gets to (Drama 3 speaks about 12 to 18 characters a second). Nothing when
+    that is the end; the whole text again, with spaces added for a new seed, when that is the start."""
+
+    ends = [0] + [m.end() for m in re.finditer(r"[.!?;:]+[\"')]*\s+", text)] + [len(text)]
+    at = min(ends, key=lambda i: abs(i - heard * per_second))
+    if at == 0:
+        return text + " " * (attempt + 1)
+    return text[at:].strip()
 
 
 def sentences(pieces: AsyncIterator[str], first_min: int = 12, min_chars: int = 40, first_words: int = 0) -> AsyncIterator[str]:

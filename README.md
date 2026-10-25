@@ -186,6 +186,17 @@ and Bolt's first token at 95 ms.
 voice-prefix cache, and the Cosmos3-Edge ports for Metal and CUDA. The DGX Spark's Drama 3 still runs on
 plotarmordev's NVFP4 fork, because stock 1.1.4 refuses the pruned checkpoint.
 
+**Long lines that go quiet.** Drama 3 sometimes speaks the first sentence of a long line and then only silence or a
+flat hum near −36 dBFS until the frame cap, on about 1 in 5 paragraph-length inputs, and the same input every time
+(the seed comes from the prompt; [ashhart/TensorFold#1275](https://github.com/ashhart/TensorFold/issues/1275)). It is
+the model's sampling, not a TensorFold bug, and 1.1.3 does the same. On the Mac, `kgm` starts Drama 3 with 1.1.4's
+silence guard: `--silence-floor-dbfs=-30 --silence-seconds=4 --silence-mid-s=2 --silence-mid-min-voiced-s=1
+--silence-redraws=3 --silence-redraw-budget-s=90` (whole replies are redrawn; good takes stay byte-identical). The
+guard never redraws a stream, and the DGX Spark's NVFP4 engine has no guard yet, so Boo also checks each streamed
+take itself: after 3 s under −30 dBFS it drops the quiet tail and asks for the text after the last sentence spoken
+(a new text draws a new seed). On 12 paragraphs the stalled one came back whole in one extra request, and the other
+11 were byte-identical with the check on.
+
 ## Settings in the page
 
 - **Name**: what the assistant is called (Boo by default); it answers to it, and the header follows.
@@ -232,7 +243,9 @@ What the one-shot installer does, by hand:
    - Nemotron 3.5 Bolt with the TensorFold 1.1.4 release (`tensorfold serve … --no-thinking --context 32768`), on
      `:8091`.
    - Drama 3 NVFP4 with named voices: `--voices ~/voices/<mac|spark> --default-voice vesper` (voices from the Hugging
-     Face repo), on `:8098` (Mac) or `:8093` (Spark).
+     Face repo), on `:8098` (Mac) or `:8093` (Spark). On a build with 1.1.4's silence guard add
+     `--silence-floor-dbfs=-30 --silence-seconds=4 --silence-mid-s=2 --silence-mid-min-voiced-s=1 --silence-redraws=3
+     --silence-redraw-budget-s=90` (see [Measured speed](#measured-speed)).
    - Cosmos3-Edge with `--vision` and `--keep-warm 0`, on `:8099`.
 2. **Eyes of Kai.** Clone [tonyd2wild/eyes-of-kai](https://github.com/tonyd2wild/eyes-of-kai), apply
    `patches/eyes-of-kai-retention.patch` (`git apply`), set `PORT=3870` and `BIND_HOST=127.0.0.1` in its `.env`, and

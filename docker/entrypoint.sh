@@ -30,9 +30,14 @@ if [ -d /models/bolt ]; then
   start bolt "$BOLT_PORT" "$TF" serve /models/bolt --name nvidia-nemotron-3.5-bolt --host 127.0.0.1 --port "$BOLT_PORT" \
     --no-thinking --context "${BOLT_CONTEXT:-32768}" --parallel 2 --no-update-check
 fi
+# Drama 3's silence guard (TensorFold 1.1.4) when the build has it; the CUDA NVFP4 engine does not yet, and Boo's own
+# check then drops a stalled take's quiet tail and asks for the rest
+GUARD="--silence-floor-dbfs=-30 --silence-seconds=4 --silence-mid-s=2 --silence-mid-min-voiced-s=1 --silence-redraws=3 --silence-redraw-budget-s=90"
+guard() { case "$("$1" serve --help 2>&1 || true)" in *--silence-mid-min-voiced-s*) echo "$GUARD" ;; esac; }
 if [ -d /models/drama ]; then
+  # shellcheck disable=SC2046 # the guard's flags are separate words
   start drama "$DRAMA_PORT" "$KT/tensorfold-drama3-nvfp4" serve /models/drama --name drama-3 --host 127.0.0.1 \
-    --port "$DRAMA_PORT" --voices /voices --default-voice "${VOICE:-vesper}" --no-update-check
+    --port "$DRAMA_PORT" --voices /voices --default-voice "${VOICE:-vesper}" --no-update-check $(guard "$KT/tensorfold-drama3-nvfp4")
 fi
 if [ -d /models/cosmos3 ]; then
   start cosmos3 "$COSMOS_PORT" "$KT/tensorfold-cosmos3" serve /models/cosmos3 --name cosmos3 --host 127.0.0.1 \

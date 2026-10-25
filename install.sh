@@ -326,6 +326,11 @@ check() { case $1 in
   agent) curl -sf -m 2 -o /dev/null "127.0.0.1:$AGENT_PORT/health" ;;
   *)     curl -sf -m 2 -o /dev/null "127.0.0.1:$(port "$1")/v1/models" ;;
 esac; }
+# Drama 3 sometimes goes quiet after a sentence until the frame cap; TensorFold 1.1.4's silence guard redraws such a reply
+# and ends such a stream (Boo then asks for the rest). Only builds that list the flags get them: the CUDA NVFP4 engine
+# has no guard yet, and Boo's own check covers it.
+GUARD="--silence-floor-dbfs=-30 --silence-seconds=4 --silence-mid-s=2 --silence-mid-min-voiced-s=1 --silence-redraws=3 --silence-redraw-budget-s=90"
+guard() { case "$("$1" serve --help 2>&1)" in *--silence-mid-min-voiced-s*) echo "$GUARD" ;; esac; }
 pidof_() { local f="$KGM_HOME/run/$1.pid"; [ -f "$f" ] && kill -0 "$(cat "$f")" 2>/dev/null && cat "$f"; }
 launch() {
   local s=$1 log="$KGM_HOME/logs/$1.log"
@@ -336,7 +341,9 @@ launch() {
             exec "$TF_STOCK/bin/tensorfold-native" serve "$BOLT_DIR" --name nvidia-nemotron-3.5-bolt --host 127.0.0.1 \
               --port "$BOLT_PORT" --no-thinking --context 32768 --parallel 2 --no-update-check
           fi ;;
-    drama)  exec env MODEL="$DRAMA_DIR" VOICES="$KGM_HOME/voices" VOICE=vesper PORT="$DRAMA_PORT" "$KB/scripts/serve-drama.sh" ;;
+    drama)  if [ "$PLATFORM" = mac ]; then d="$KB/bin/tensorfold-native"; else d="$KB/bin/tensorfold-drama3-nvfp4"; fi
+            # shellcheck disable=SC2046 # the guard's flags are separate words
+            exec env MODEL="$DRAMA_DIR" VOICES="$KGM_HOME/voices" VOICE=vesper PORT="$DRAMA_PORT" "$KB/scripts/serve-drama.sh" $(guard "$d") ;;
     cosmos) exec env MODEL="$COSMOS_DIR" PORT="$COSMOS_PORT" "$KB/scripts/serve-cosmos.sh" ;;
     kai)    cd "$KGM_HOME/eyes-of-kai" && exec node src/server.js ;;
     agent)  cd "$KGM_HOME/app" && exec "$KGM_HOME/venv/bin/python" -m voice_agent.server --profile "$KGM_HOME/profile.json" --port "$AGENT_PORT" ;;
