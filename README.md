@@ -62,6 +62,10 @@ licence or the lowest delay.
   microphone (it stops on disconnect, after 2 s without audio and after 60 s), warms with one "Mm." at a time and never
   while anything is being said; a refused line is asked again for up to `retry_s` (6 s) instead of being lost; a
   stopped turn frees its speech slot at once.
+- **DGX Spark installs: the page could not connect** after Parakeet warmed up. NeMo's CUDA-graph decoder wrote a NUL
+  into Python's shared `b" "` object (an empty NVRTC log read into `b" " * 1`), which broke uvicorn's status lines and
+  websockets' parser and left damaged `.pyc` files. Boo now gives NVRTC its own buffer (the Docker image was not
+  affected).
 - **Bolt repetition loops:** a reply that starts repeating a sentence it already said ends there, unsaid.
 - **Interrupted replies** stopped before their first word no longer leave "(interrupted)" in the history for the
   brain to copy.
