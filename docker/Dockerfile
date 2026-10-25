@@ -19,6 +19,12 @@ RUN curl -fsSL https://nodejs.org/dist/v22.14.0/node-v22.14.0-linux-arm64.tar.xz
 # all from the build context (see docker/README.md)
 COPY tensorfold-${TF_VERSION}-linux-aarch64 /opt/tensorfold
 COPY keys-boo-tensorfold-1.1.4-linux-aarch64 /opt/keys-tensorfold
+# The CUDA 13.1 cuBLASLt the TensorFold engines are qualified with, for them only (the entrypoint puts it first on their
+# library path; PyTorch keeps the base image's 13.6). On 13.6 Drama 3 turns its one-row tower kernel off and speaks
+# slower.
+RUN pip install --no-deps --target /tmp/cublas nvidia-cublas==13.1.1.3 && mkdir -p /opt/tf-cuda/lib \
+    && mv /tmp/cublas/nvidia/cu13/lib/libcublasLt.so.13 /tmp/cublas/nvidia/cu13/lib/libcublas.so.13 /opt/tf-cuda/lib/ \
+    && rm -rf /tmp/cublas
 
 # The agent and its Python dependencies (PyTorch comes from the base image)
 WORKDIR /opt/boo

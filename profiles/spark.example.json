@@ -24,7 +24,8 @@
       "first_words": 5
     },
     "voice": "vesper",
-    "samples": "~/voices/spark"
+    "samples": "~/voices/spark",
+    "keep_warm": false
   },
   "turn": {
     "end_silence_ms": 400,

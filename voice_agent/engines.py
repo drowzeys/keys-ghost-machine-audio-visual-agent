@@ -231,7 +231,9 @@ class Voice:
         self.model = spec["model"]
         self.sample_rate = int(spec.get("sample_rate", 44_100))
         self.samples = spec.get("samples")  # the voices' files and .wav samples
-        # warm it while the person speaks (Drama 3 is slow to start when idle); Kokoro answers at once and sets false
+        # warm it while the person speaks (Drama 3 on a Mac is slow to start when idle); Kokoro answers at once and sets
+        # false, and so does the DGX Spark profile: its CUDA Drama 3 runs one synthesis at a time and starts fast from
+        # idle, so a throwaway line still being spoken when the person stops held the reply back (503s, ~0.4 s more)
         self.keep_warm = bool(spec.get("keep_warm", True))
         self.client = httpx.AsyncClient(timeout=httpx.Timeout(120, connect=5))
         # Drama 3 takes two speech streams at once (TensorFold --parallel, default 2) and answers 503 "speech output

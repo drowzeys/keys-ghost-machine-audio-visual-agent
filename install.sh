@@ -25,7 +25,7 @@
 set -euo pipefail
 
 REPO=drowzeys/keys-ghost-machine-audio-visual-agent
-RELEASE=${KGM_RELEASE:-v0.2.1}
+RELEASE=${KGM_RELEASE:-v0.2.2}
 TF_VERSION=1.1.4
 KAI_COMMIT=7f2f02b
 KGM_HOME=${KGM_HOME:-$HOME/keys-ghost-machine}

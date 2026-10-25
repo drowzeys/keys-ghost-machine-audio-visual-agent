@@ -14,6 +14,9 @@ case $VOICE_ENGINE in full|lite|both) ;; *) echo "[boo] VOICE_ENGINE must be ful
 export VOICE_ENGINE
 TF=/opt/tensorfold/bin/tensorfold-native
 KT=/opt/keys-tensorfold/bin
+# The TensorFold engines get the CUDA 13.1 cuBLASLt they are qualified with (Drama 3's one-row tower kernel turns itself
+# off on another version, and the base image's is 13.6), ahead of the image's own libraries, which stay PyTorch's
+TFENV=(env "LD_LIBRARY_PATH=/opt/tf-cuda/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}")
 pids=()
 trap 'kill "${pids[@]}" 2>/dev/null; wait' EXIT INT TERM
 
@@ -31,7 +34,7 @@ start() {  # name port command...
 }
 
 if [ -d /models/bolt ]; then
-  start bolt "$BOLT_PORT" "$TF" serve /models/bolt --name nvidia-nemotron-3.5-bolt --host 127.0.0.1 --port "$BOLT_PORT" \
+  start bolt "$BOLT_PORT" "${TFENV[@]}" "$TF" serve /models/bolt --name nvidia-nemotron-3.5-bolt --host 127.0.0.1 --port "$BOLT_PORT" \
     --no-thinking --context "${BOLT_CONTEXT:-32768}" --parallel 2 --no-update-check
 fi
 # Drama 3's silence guard (TensorFold 1.1.4) when the build has it (the CUDA NVFP4 engine since v0.2.0); Boo's own
@@ -40,7 +43,7 @@ GUARD="--silence-floor-dbfs=-30 --silence-seconds=4 --silence-mid-s=2 --silence-
 guard() { case "$("$1" serve --help 2>&1 || true)" in *--silence-mid-min-voiced-s*) echo "$GUARD" ;; esac; }
 if [ -d /models/drama ] && [ "$VOICE_ENGINE" != lite ]; then
   # shellcheck disable=SC2046 # the guard's flags are separate words
-  start drama "$DRAMA_PORT" "$KT/tensorfold-drama3-nvfp4" serve /models/drama --name drama-3 --host 127.0.0.1 \
+  start drama "$DRAMA_PORT" "${TFENV[@]}" "$KT/tensorfold-drama3-nvfp4" serve /models/drama --name drama-3 --host 127.0.0.1 \
     --port "$DRAMA_PORT" --voices /voices --default-voice "${VOICE:-vesper}" --no-update-check $(guard "$KT/tensorfold-drama3-nvfp4")
 fi
 if [ "$VOICE_ENGINE" != full ]; then
@@ -48,7 +51,7 @@ if [ "$VOICE_ENGINE" != full ]; then
     --voice "${KOKORO_VOICE:-bf_emma}" --port "$KOKORO_PORT"
 fi
 if [ -d /models/cosmos3 ]; then
-  start cosmos3 "$COSMOS_PORT" "$KT/tensorfold-cosmos3" serve /models/cosmos3 --name cosmos3 --host 127.0.0.1 \
+  start cosmos3 "$COSMOS_PORT" "${TFENV[@]}" "$KT/tensorfold-cosmos3" serve /models/cosmos3 --name cosmos3 --host 127.0.0.1 \
     --port "$COSMOS_PORT" --vision --context 16384 --parallel 2 --keep-warm 0 --no-update-check
 fi
 if [ "${KAI:-0}" = 1 ]; then

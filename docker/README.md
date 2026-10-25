@@ -6,7 +6,8 @@ on stock TensorFold 1.1.4, Drama 3 NVFP4 with the 14 voices and Cosmos3-Edge on 
 Model weights are not in the image; mount them.
 
 `VOICE_ENGINE` needs image 0.2.0 or later (0.1.0 has the full voice, Drama 3, only). Since 0.2.0 the DGX Spark's
-Drama 3 engine also has TensorFold 1.1.4's silence guard, which the container turns on.
+Drama 3 engine also has TensorFold 1.1.4's silence guard, which the container turns on. Use 0.2.2 or later for the
+full voice's speed: 0.2.1 and earlier answered in about 1.0–1.1 s instead of about 0.5 s (see the main README).
 
 ## Requirements
 
@@ -31,7 +32,7 @@ A model folder that is not mounted is skipped. Point at a server elsewhere inste
 docker run --gpus all --rm -p 8095:8095 \
   -v ~/models/bolt:/models/bolt -v ~/models/drama:/models/drama -v ~/models/cosmos3:/models/cosmos3 \
   -v ~/models/hf-cache:/models/hf-cache -e KAI=1 \
-  ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:0.2.1
+  ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:0.2.2
 ```
 
 Lite voice only (Kokoro-82M, no Drama 3 mount), or both with a Full/Lite switch in the page:
@@ -39,7 +40,7 @@ Lite voice only (Kokoro-82M, no Drama 3 mount), or both with a Full/Lite switch 
 ```sh
 docker run --gpus all --rm -p 8095:8095 -e VOICE_ENGINE=lite \
   -v ~/models/bolt:/models/bolt -v ~/models/cosmos3:/models/cosmos3 -v ~/models/hf-cache:/models/hf-cache \
-  ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:0.2.1
+  ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:0.2.2
 # both: add -v ~/models/drama:/models/drama and use -e VOICE_ENGINE=both
 ```
 
@@ -56,6 +57,11 @@ put HTTPS in front of it (for example Tailscale Serve) as the main README descri
 | `KAI` | 0 | 1 starts Eyes of Kai for camera memory (kept 2 days; the page can change it) |
 | `HERMES_CMD` | — | a Hermes ACP command for the back agent, e.g. `ssh host hermes acp` |
 | `DEEP_URL`, `DEEP_MODEL` | — | an OpenAI-compatible model to hand deep questions to instead |
+
+If the agent stops at start with `CUDA error: out of memory` while loading Parakeet although `free -g` shows plenty
+"available", the DGX Spark's page cache is holding that memory (CUDA cannot take it back; common right after a large
+download or build). Drop the cache with `sync; echo 1 | sudo tee /proc/sys/vm/drop_caches` and start the container
+again.
 
 ## Build it yourself
 

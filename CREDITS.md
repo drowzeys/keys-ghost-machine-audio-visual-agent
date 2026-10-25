@@ -22,7 +22,8 @@ below keeps its own licence.
   The prebuilt builds in this repository's releases are unofficial builds of TensorFold 1.1.4 (source:
   [drowzeys/TensorFold](https://github.com/drowzeys/TensorFold)); the DGX Spark's Drama 3 engine is
   [plotarmordev's NVFP4 Drama fork](https://github.com/plotarmordev/TensorFold) (branch `drama-nvfp4`) with our
-  voice-prefix cache. The Docker image is built on NVIDIA's PyTorch container (`nvcr.io/nvidia/pytorch:26.07-py3`).
+  voice-prefix cache. The Docker image is built on NVIDIA's PyTorch container (`nvcr.io/nvidia/pytorch:26.07-py3`)
+  and gives the TensorFold engines NVIDIA cuBLAS 13.1 (the `nvidia-cublas` wheel, under NVIDIA's licence).
 
 ## Lite voice (optional)
 
