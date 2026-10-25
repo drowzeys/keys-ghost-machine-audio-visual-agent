@@ -392,7 +392,9 @@ A profile names each engine and the turn timing:
 - `brain`: the front model's URL, model name, system prompt and sampling.
 - `voice`: the Drama 3 URL, default voice, voices folder (for previews and descriptions) and `first_words` (the first
   spoken chunk is cut after this many words). `keep_warm: false` stops the warm-up requests (for an engine that starts
-  at once).
+  at once). Drama 3 serves two speech streams at once (TensorFold `--parallel`, default 2) and answers a third with
+  503, so warm-ups never run while something is being said, and a refused line is asked again for up to `retry_s`
+  seconds (default 6) instead of being lost.
 - `voice_engine`: `full` (default), `lite` or `both`; `--voice` on the command line or `VOICE_ENGINE` overrides it.
   `voice_lite` changes the lite voice's settings (default: Kokoro-82M at `http://127.0.0.1:8197/v1`, voice `bf_emma`,
   no keep-warm).

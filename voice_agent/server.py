@@ -20,6 +20,7 @@ import os
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import aclosing
 from pathlib import Path
 
 import numpy as np
@@ -28,12 +29,12 @@ import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 
-from .engines import SIDES, SAMPLE_RATE, Brain, Clock, Said, sides, Recognizer, Vad, Voice, cancel, jpeg_to_png, sentences, wants_eyes
+from .engines import SIDES, SAMPLE_RATE, Brain, Clock, Said, sides, Recognizer, Vad, Voice, cancel, jpeg_to_png, sentences, unrepeated, wants_eyes
 from .memory import Memory, with_context
 from . import backstage, lookup
 
 HERE = Path(__file__).resolve().parent
-LOGGED = {"transcript", "reply", "deep", "task", "confirm", "error", "metrics", "emotion"}
+LOGGED = {"transcript", "reply", "deep", "task", "confirm", "error", "metrics", "emotion", "repeat"}
 
 
 HANDS = re.compile(r"\b(fingers?|thumbs?|hands?|holding up|gestures?|peace sign|counting|how many am i)\b")
@@ -140,6 +141,8 @@ class Conversation:
         self.history = [{"role": "system", "content": engines.profile["brain"].get("system", "You are a helpful voice assistant.")}]
         self.send_lock = asyncio.Lock()
         self.warming: asyncio.Event | None = None  # set = stop warming
+        self.audio_at = 0.0  # when the microphone last sent audio
+        self.closed = False  # the page has gone
         self.held: list | None = None  # a quiet turn's events, kept until it is let out
         self.frame: str | None = None  # the camera's latest picture (base64 JPEG), when the page sends one
         self.frame_at = 0.0
@@ -194,6 +197,7 @@ class Conversation:
     # ----- listening -----
 
     async def audio(self, data: bytes) -> None:
+        self.audio_at = time.monotonic()
         self.pending = np.concatenate([self.pending, np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768])
         while len(self.pending) >= Vad.WINDOW:
             window, self.pending = self.pending[: Vad.WINDOW], self.pending[Vad.WINDOW :]
@@ -248,9 +252,20 @@ class Conversation:
             return
         period = self.e.profile.get("turn", {}).get("keep_warm_s", 0.7)
         stop = self.warming = asyncio.Event()
+        began = time.monotonic()
+
+        def going() -> bool:
+            # only while this page is connected, its microphone still sends, and for at most a minute: a page that
+            # closed or went quiet mid-speech never ends the utterance, and its warming must not run on for hours
+            # (it held one of Drama 3's two speech slots for good, so replies got 503s)
+            now = time.monotonic()
+            if stop.is_set() or self.closed or now - self.audio_at > 2 or now - began > 60:
+                stop.set()
+                return False
+            return True
 
         async def brain():
-            while not stop.is_set():
+            while going():
                 await self.e.brain.warm(self.history + [{"role": "user", "content": "…"}])
                 try:
                     await asyncio.wait_for(stop.wait(), period)
@@ -260,12 +275,13 @@ class Conversation:
         speaker, name = self.voice, self.voice_name
 
         async def voice():
-            while not stop.is_set():
-                try:
-                    async for _ in speaker.stream("Mm.", name):
+            while going():
+                # one throwaway line at a time across every page, and none while anything is being said
+                if not await speaker.warm(name):
+                    try:
+                        await asyncio.wait_for(stop.wait(), 0.1)
+                    except asyncio.TimeoutError:
                         pass
-                except Exception:
-                    return
 
         # an engine that answers at once (Kokoro: "Mm." in ~20 ms) needs no warming and would only spin
         for job, on in ((brain, warm.get("brain")), (voice, warm.get("voice") and speaker.keep_warm)):
@@ -375,11 +391,12 @@ class Conversation:
                 yield text
             async for sentence in sentences(pieces(), **self.e.profile["voice"].get("chunks", {})):
                 await self.emit({"type": "reply", "text": sentence, "source": source})
-                async for pcm in speaker.stream(sentence, self.voice_name):
-                    if not started:
-                        started = True
-                        await self.emit({"type": "audio_start", "sample_rate": speaker.sample_rate})
-                    await self.emit(pcm)
+                async with aclosing(speaker.stream(sentence, self.voice_name)) as audio:
+                    async for pcm in audio:
+                        if not started:
+                            started = True
+                            await self.emit({"type": "audio_start", "sample_rate": speaker.sample_rate})
+                        await self.emit(pcm)
                 spoken.append(sentence)
             await self.emit({"type": "audio_end"})
         finally:
@@ -558,17 +575,22 @@ class Conversation:
                         yield piece
 
             started = False
-            async for sentence in sentences(pieces(), **self.e.profile["voice"].get("chunks", {})):
+            repeat: list[str] = []  # the line the brain began to say a second time, where its reply was ended
+            async for sentence in sentences(unrepeated(pieces(), repeat), **self.e.profile["voice"].get("chunks", {})):
                 clock.mark("first_sentence_ms")
                 await self.emit({"type": "reply", "text": sentence})
-                async for pcm in speaker.stream(sentence, self.voice_name):
-                    if not started:
-                        started = True
-                        clock.mark("first_audio_ms")
-                        await self.emit({"type": "audio_start", "sample_rate": speaker.sample_rate})
-                    await self.emit(pcm)
+                # closed at once when the turn is stopped, so the engine's speech slot is let go now, not at GC
+                async with aclosing(speaker.stream(sentence, self.voice_name)) as audio:
+                    async for pcm in audio:
+                        if not started:
+                            started = True
+                            clock.mark("first_audio_ms")
+                            await self.emit({"type": "audio_start", "sample_rate": speaker.sample_rate})
+                        await self.emit(pcm)
                 spoken.append(sentence)
             clock.mark("done_ms")
+            if repeat:
+                log({"type": "repeat", "text": repeat[0]})
             await self.emit({"type": "audio_end"})
             await self.emit({"type": "metrics", **clock.marks})
         except asyncio.CancelledError:
@@ -580,10 +602,12 @@ class Conversation:
             for job in jobs:
                 job.cancel()
             if asked and self.history[-1]["role"] == "user":
-                if heard["yes"]:  # what was actually said goes in, even when cut off
-                    self.history.append({"role": "assistant", "content": tag[0] + (" ".join(spoken) or "(interrupted)")})
+                if heard["yes"] and spoken:  # what was actually said goes in, even when cut off
+                    self.history.append({"role": "assistant", "content": tag[0] + " ".join(spoken)})
                 else:
-                    self.history.pop()  # a quiet turn nobody heard: as if it never happened
+                    # a quiet turn nobody heard, or a reply stopped before its first words: as if it never happened (a
+                    # placeholder such as "(interrupted)" in the history is copied by the brain and spoken as a reply)
+                    self.history.pop()
 
 
 def build(profile: dict) -> FastAPI:
@@ -688,6 +712,8 @@ def build(profile: dict) -> FastAPI:
         except WebSocketDisconnect:
             pass
         finally:
+            talk.closed = True
+            talk.stop_warming()
             await talk.interrupt("closed")
             for job in list(talk.tasks):
                 job.cancel()

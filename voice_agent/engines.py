@@ -8,6 +8,7 @@ import asyncio
 import json
 import re
 import time
+from contextlib import aclosing
 from typing import AsyncIterator, Callable
 
 import httpx
@@ -210,6 +211,13 @@ class Voice:
         # warm it while the person speaks (Drama 3 is slow to start when idle); Kokoro answers at once and sets false
         self.keep_warm = bool(spec.get("keep_warm", True))
         self.client = httpx.AsyncClient(timeout=httpx.Timeout(120, connect=5))
+        # Drama 3 takes two speech streams at once (TensorFold --parallel, default 2) and answers 503 "speech output
+        # capacity is full" to a third, and a stream the agent let go holds its slot until the server notices (~50 ms).
+        # So speech counts its streams (every conversation shares this Voice), warming speaks only when no speech is
+        # under way and only one line at a time, and a refused request is asked again for up to retry_s.
+        self.speaking = 0
+        self.warming = False
+        self.retry_s = float(spec.get("retry_s", 6.0))
 
     async def voices(self) -> list[dict]:
         """The engine's named voices ([{id, description}]); empty when it only has its built-in voice. An engine that
@@ -242,24 +250,57 @@ class Voice:
         time, since its seed comes from the prompt, so a stalled take's quiet tail is dropped and the text it most likely
         left unsaid is asked for again, at most twice."""
 
-        for attempt in range(3):
-            stalled: list[float] = []
-            async for pcm in self.take(text, voice, stalled):
-                yield pcm
-            if not stalled:
-                return
-            text = unspoken(text, stalled[0], attempt)
-            if not text:
-                return
+        self.speaking += 1
+        try:
+            for attempt in range(3):
+                stalled: list[float] = []
+                async for pcm in self.take(text, voice, stalled):
+                    yield pcm
+                if not stalled:
+                    return
+                text = unspoken(text, stalled[0], attempt)
+                if not text:
+                    return
+        finally:
+            self.speaking -= 1
 
-    async def take(self, text: str, voice: str | None, stalled: list[float]) -> AsyncIterator[bytes]:
+    async def warm(self, voice: str | None = None) -> bool:
+        """Speaks a throwaway "Mm." to keep the engine from going idle, unless speech or another warm line is under
+        way (both keep it warm already, and a third stream would be refused). False when it did not speak."""
+
+        if self.speaking or self.warming:
+            return False
+        self.warming = True
+        try:
+            async for _ in self.take("Mm.", voice, [], retry=False):
+                pass
+            return True
+        except Exception:
+            return False
+        finally:
+            self.warming = False
+
+    async def opened(self, body: dict, retry: bool) -> httpx.Response:
+        """The streamed reply to ``body``; a 503 (all speech slots busy, or one still being let go) is asked again
+        every 50 ms for up to retry_s, so a spoken line waits a moment instead of being lost."""
+
+        deadline = time.monotonic() + (self.retry_s if retry else 0)
+        while True:
+            reply = await self.client.send(self.client.build_request("POST", self.url, json=body), stream=True)
+            if reply.status_code != 503 or time.monotonic() >= deadline:
+                return reply
+            await reply.aclose()
+            await asyncio.sleep(0.05)
+
+    async def take(self, text: str, voice: str | None, stalled: list[float], retry: bool = True) -> AsyncIterator[bytes]:
         """One request. Quiet after the first second of speech is held back until speech resumes; STALL_S of it ends
         the take, and the seconds spoken before it go into ``stalled``."""
 
         body = {"model": self.model, "input": text, "response_format": "pcm", "stream": True}
         if voice:
             body["voice"] = voice
-        async with self.client.stream("POST", self.url, json=body) as reply:
+        reply = await self.opened(body, retry)
+        try:
             reply.raise_for_status()
             rate = reply.headers.get("x-sample-rate")
             if rate:
@@ -296,6 +337,8 @@ class Voice:
                     return
             if held:
                 yield held
+        finally:
+            await reply.aclose()
 
 
 STALL_S = 3.0  # quiet that means a stalled take; Drama 3's own pauses run up to about 2.4 s
@@ -317,6 +360,56 @@ def unspoken(text: str, heard: float, attempt: int, per_second: float = 14.0) ->
     if at == 0:
         return text + " " * (attempt + 1)
     return text[at:].strip()
+
+
+SENTENCE_END = re.compile(r"[.!?]+[\"')\]]*\s+|\n+")
+
+
+def said_as(sentence: str) -> str:
+    """A sentence as words only, for spotting one said again ("I'm on it." and "I'm on it!" are the same)."""
+
+    return " ".join(re.sub(r"[^\w\s']", " ", sentence.lower()).split())
+
+
+async def unrepeated(pieces: AsyncIterator[str], stopped: list | None = None) -> AsyncIterator[str]:
+    """The reply up to where it starts saying itself again. In a long conversation a small model can fall into a copy
+    loop ("That's Boo. I'm on it. That's Boo. I'm on it. ..." until max_tokens), so a sentence already said in this
+    reply ends it there, unsaid, and the model's stream is closed. The first sentence goes through piece by piece (it
+    cannot repeat anything, and speech starts on it); later ones go out once whole. ``stopped`` gets the repeat."""
+
+    seen: set[str] = set()
+    first, head, rest = True, "", ""  # head: the first sentence so far; rest: a later sentence not yet checked
+    async with aclosing(pieces) as source:
+        async for piece in source:
+            if first:
+                head += piece
+                end = SENTENCE_END.search(head)
+                if not end:
+                    yield piece
+                    continue
+                first = False
+                cut = len(piece) - (len(head) - end.end())  # where in this piece the first sentence ends
+                if cut > 0:
+                    yield piece[:cut]
+                seen.add(said_as(head[: end.end()]))
+                piece = piece[max(cut, 0):]
+            rest += piece
+            while end := SENTENCE_END.search(rest):
+                sentence, rest = rest[: end.end()], rest[end.end():]
+                words = said_as(sentence)
+                if len(words) >= 6 and words in seen:
+                    if stopped is not None:
+                        stopped.append(sentence.strip())
+                    return
+                seen.add(words)
+                yield sentence
+        if rest:
+            words = said_as(rest)
+            if len(words) >= 6 and words in seen:
+                if stopped is not None:
+                    stopped.append(rest.strip())
+                return
+            yield rest
 
 
 def sentences(pieces: AsyncIterator[str], first_min: int = 12, min_chars: int = 40, first_words: int = 0) -> AsyncIterator[str]:
