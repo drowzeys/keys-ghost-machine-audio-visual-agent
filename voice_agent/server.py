@@ -357,12 +357,23 @@ class Conversation:
 
     def start_task(self, agent, text: str, last: str | None) -> None:
         # only the user's own words (with what the camera or hand tracker measured, when the turn used them): the front
-        # brain's lines are guesses and stalls that the agent would copy; its own session remembers earlier tasks
-        prompt = (f"{last or text}\n\n[Do it now with your tools and reply with the answer itself, never that you "
+        # brain's lines are guesses and stalls that the agent would copy; its own session remembers earlier tasks.
+        # The Studio's agent reads the words alone: what the camera saw is not a Studio request
+        prompt = (f"{text if agent.kind == 'studio' else (last or text)}\n\n[Do it now with your tools and reply with the answer itself, never that you "
                   f"will check: nothing after this reply reaches the user.]")
         job = asyncio.create_task(self.backstage(agent, prompt))
         self.tasks.add(job)
         job.add_done_callback(self.tasks.discard)
+
+    async def start_when_heard(self, heard: dict, agent, text: str, last: str | None) -> None:
+        """Starts a back agent's task once its turn is let out; never when the quiet turn was dropped (a new turn began,
+        or the page went away)."""
+
+        while not heard["yes"]:
+            if self.heard is not heard or self.closed:
+                return
+            await asyncio.sleep(0.03)
+        self.start_task(agent, text, last)
 
     async def backstage(self, agent, prompt: str) -> None:
         """A back agent's task: its steps go to the page as they happen, its answer is spoken once nobody is talking."""
@@ -371,6 +382,12 @@ class Conversation:
         await self.send({"type": "task", "id": task, "agent": agent.label, "state": "started"})
 
         def progress(kind: str, value: str) -> None:
+            if kind == "studio":  # the Studio agent's word to the page ("play" a take in the Studio's Voice panel)
+                try:
+                    asyncio.create_task(self.send({"type": "studio", **json.loads(value)}))
+                except ValueError:
+                    pass
+                return
             asyncio.create_task(self.send({"type": "task", "id": task, "agent": agent.label, "state": "step",
                                            "kind": kind, "text": step_text(kind, value)}))
 
@@ -395,7 +412,7 @@ class Conversation:
 
         started = time.monotonic()
         try:
-            answer = await (agent.run(prompt, progress, confirm) if agent.kind == "acp" else agent.run(prompt, progress))
+            answer = await (agent.run(prompt, progress, confirm) if agent.kind in ("acp", "studio") else agent.run(prompt, progress))
         except Exception as error:
             await self.send({"type": "task", "id": task, "agent": agent.label, "state": "error", "text": str(error)[:300]})
             answer = f"Sorry, {agent.label} ran into a problem: {str(error)[:120]}"
@@ -526,6 +543,7 @@ class Conversation:
 
             deep: list[asyncio.Queue] = []  # a direct back agent's reply, when the front brain hands the turn over
             agent = self.e.agents.get(self.agent)
+            agent = backstage.claims(text, self.e.agents, agent) or agent  # a Studio request goes to the Studio's agent
             handed = [False]
 
             async def think_deep(queue: asyncio.Queue) -> None:
@@ -541,7 +559,9 @@ class Conversation:
                     deep.append(asyncio.Queue())
                     jobs.append(asyncio.create_task(think_deep(deep[0])))
                 else:  # tools take a while: it works in the background and reports when done
-                    self.start_task(agent, text, last)
+                    # only once the person has really stopped: a quiet turn (eager_silence_ms) dropped because they
+                    # went on talking must not have started anything (a render queued twice, or for half a sentence)
+                    asyncio.create_task(self.start_when_heard(heard, agent, text, last))
                 await self.emit({"type": "deep", "agent": agent.name, "label": agent.label, "kind": agent.kind})
                 clock.mark("deep_ms")
 
@@ -560,7 +580,7 @@ class Conversation:
                 pass
             elif agent and backstage.asked_for(text, agent):  # "ask Hermes ...", live facts: hand over at once
                 await hand_over()
-                if agent.kind == "acp":  # a fixed short line: the front brain would guess the answer from memory
+                if agent.kind in ("acp", "studio"):  # a fixed short line: the front brain would guess the answer from memory
                     await self.emit({"type": "emotion", "emotion": "thinking"})
                     brain = backstage.Ack()
 

@@ -1,0 +1,50 @@
+{
+  "name": "studio",
+  "asr": {
+    "kind": "nemo",
+    "model": "nvidia/parakeet-tdt-0.6b-v3"
+  },
+  "brain": {
+    "url": "http://127.0.0.1:8091/v1",
+    "model": "nvidia-nemotron-3.5-bolt",
+    "system": "You are Boo, the voice director of Imagination Studio, a film studio on this computer network. You are speaking out loud: answer in one to three short spoken sentences, plain words, no lists, no markdown, no emoji. If you did not catch something, ask. Start every reply with your mood in square brackets, one of [neutral] [happy] [excited] [curious] [thinking] [surprised] [concerned] [sad] [playful], then the words you say. Your Studio agent works the studio: the render queue and how long it has left, the director's Slate films, shots and takes, rendering a shot, changing how a shot looks, playing a take, cancelling a job. Add [deep] after the mood, and say only one short sentence that you are on it, whenever the director asks for any of that. Never invent what is in the queue or the film: only the Studio agent knows.",
+    "extra": {
+      "max_tokens": 200,
+      "temperature": 0.7,
+      "chat_template_kwargs": {
+        "enable_thinking": false
+      }
+    }
+  },
+  "voice": {
+    "url": "http://127.0.0.1:8093/v1",
+    "model": "drama-3",
+    "sample_rate": 44100,
+    "chunks": {
+      "first_words": 5
+    },
+    "voice": "vesper",
+    "samples": "~/voices/spark",
+    "keep_warm": false
+  },
+  "voice_engine": "full",
+  "turn": {
+    "end_silence_ms": 400,
+    "start_speech_ms": 64,
+    "barge_in_ms": 192,
+    "preroll_ms": 256,
+    "eager_silence_ms": 160
+  },
+  "agents": {
+    "studio": {
+      "kind": "studio",
+      "label": "Studio",
+      "url": "http://192.168.1.10:7870",
+      "key_file": "~/.config/ghost-machine/studio-key",
+      "key_env": "STUDIO_ACCESS_KEY_VALUE",
+      "confirm_over_s": 120,
+      "always": true
+    }
+  },
+  "agent": "studio"
+}

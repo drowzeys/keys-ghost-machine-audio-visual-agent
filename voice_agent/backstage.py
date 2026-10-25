@@ -1,10 +1,13 @@
 """The back agents: what the front voice hands a turn to when it needs more than a quick answer.
 
-Two kinds, chosen in the profile's "agents":
+Three kinds, chosen in the profile's "agents":
   direct  any OpenAI-compatible chat model (Redsnow 5.3 on two Sparks); fast, so its reply streams into the same turn.
   acp     any agent that speaks ACP (Agent Client Protocol: JSON-RPC 2.0, one JSON message per line on stdio) - Hermes,
           Claude Code, Codex, Qwen Code. It can run tools for a minute, so it works in the background and reports when
           done. One warm process and session per agent, like Eyes of Kai's Hermes client (tonyd2wild/eyes-of-kai).
+  studio  Imagination Studio's own HTTP API (studio.py): the render queue, Slate's films, shots and takes. It answers in
+          a second or two, asks out loud before a cancel or a long render, and with "always" (the default) takes the
+          turns that are about the Studio whichever agent the page has picked.
 """
 
 from __future__ import annotations
@@ -200,6 +203,8 @@ def stalled(text: str) -> bool:
 def plain_tool(title: str, kind: str) -> str:
     """A tool request as a few spoken words."""
 
+    if kind == "studio":  # the Studio agent words its own requests ("cancel Night Run, Opening")
+        return title
     low = title.lower()
     if "execute_code" in low or kind == "execute" or "terminal" in low:
         return "run a command on the computer"
@@ -221,6 +226,9 @@ def answer(text: str) -> str | None:
     """A spoken reply to "should I go ahead?": allow_once, allow_session, deny, or None if it is not an answer."""
 
     low = re.sub(r"\b(don'?t|do not) (ask|check)( me)?( again)?", " always ", text.lower())
+    if YES.match(low.strip()) and not re.match(r"\s*(yes|yeah|ok|okay)?[ ,.]*(no|nope|wait)\b", low.strip()):
+        # "yes, cancel it": a yes first is a yes, though "cancel" or "stop" follows
+        return "allow_session" if ALWAYS.search(low) else "allow_once"
     if NO.search(low):
         return "deny"
     if YES.search(low):
@@ -268,6 +276,8 @@ def asked_for(text: str, agent, live: bool = True) -> bool:
     """Whether the person asked for the back agent by name or for deep thought ("ask Hermes", "think hard"), or (with
     ``live``) for a fact that changes after training."""
 
+    if getattr(agent, "wants", None) and agent.wants(text):  # a tool agent that knows its own requests (studio.py)
+        return True
     low = text.lower()
     names = {agent.name.lower(), agent.label.lower(), "the agent", "your agent", *SOUNDS_LIKE.get(agent.name, ())}
     return any(f"{verb} {n}" in low for verb in ("ask", "tell", "have", "get") for n in names) or \
@@ -286,8 +296,22 @@ class Ack:
         yield self.LINES[Ack.turn % len(self.LINES)]
 
 
+def claims(text: str, agents: dict, picked):
+    """A tool agent marked "always" (the Studio's) that this turn is about, when the page has picked another agent:
+    "what's in the render queue?" goes to the Studio even while Hermes is the agent for everything else."""
+
+    if picked is not None and getattr(picked, "wants", None) and picked.wants(text):
+        return picked
+    return next((a for a in agents.values() if a is not picked and getattr(a, "always", False)
+                 and getattr(a, "wants", None) and a.wants(text)), None)
+
+
 def load(profile: dict) -> dict:
     agents = {}
     for name, spec in profile.get("agents", {}).items():
-        agents[name] = (Acp if spec.get("kind") == "acp" else Direct)(name, spec)
+        if spec.get("kind") == "studio":
+            from .studio import Studio
+            agents[name] = Studio(name, spec, profile.get("brain"))
+        else:
+            agents[name] = (Acp if spec.get("kind") == "acp" else Direct)(name, spec)
     return agents

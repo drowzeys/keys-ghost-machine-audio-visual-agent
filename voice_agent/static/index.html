@@ -109,6 +109,10 @@
   #mic.on { background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 60%, var(--accent2))); }
   input { flex: 1 1 200px; min-width: 0; font: inherit; font-size: 16px; padding: 10px 14px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); }
   #state { color: var(--muted); font: 11px/1 ui-monospace, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 38%; }
+  /* inside another page (Imagination Studio's Voice panel): the face, the conversation and the controls; the settings
+     stay on the page opened on its own ("Open in a tab") */
+  .embedded #pickers, .embedded #dev, .embedded #metrics { display: none; }
+  .embedded #stage { height: min(32vh, 280px); }
   @media (max-width: 520px) { .lbl { display: none; } #mic .lbl { display: inline; } #state { display: none; } #stage { height: min(46vh, 420px); } }
 </style>
 </head>
@@ -155,6 +159,7 @@
 </footer>
 <script type="module">
 const $ = (id) => document.getElementById(id);
+if (window.self !== window.top) document.documentElement.classList.add("embedded");
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 const mix = (a, b, t) => a + (b - a) * t;
 const store = { get(k) { try { return localStorage.getItem(k); } catch (_) { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch (_) {} } };
@@ -261,6 +266,13 @@ function taskCard(e) {
     setTimeout(() => c.remove(), 30000);
   }
 }
+// the Studio agent's word for the page: inside the Studio's Voice panel (same origin, /ghost/) the Studio plays the
+// take in its own player; on its own the page notes what would play
+function studioEvent(e) {
+  if (e.action !== "play" || !e.path) return;
+  if (window.parent !== window) window.parent.postMessage({ type: "ghost-studio", action: "play", path: e.path, title: e.title || "" }, location.origin);
+  else line("meta", "▶ " + (e.title || e.path) + " (open the Studio's Voice panel to watch it there)");
+}
 // a back agent's tool waiting for the person: Boo asks out loud; "yes, go ahead" or these buttons answer
 function confirmCard(e) {
   const c = [...$("tasks").children].find((x) => x.dataset.id === String(e.task)) || (taskCard({ id: e.task, agent: e.agent, state: "started" }), $("tasks").firstChild);
@@ -290,7 +302,8 @@ function fill(sel, list, current, key, type) {
 }
 
 function connect() {
-  ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
+  // beside the page, so it works at the root or under a path (the Studio's Voice panel serves it at /ghost/)
+  ws = new WebSocket(new URL("ws", location.href).href.replace(/^http/, "ws"));
   ws.binaryType = "arraybuffer";
   ws.onmessage = (m) => {
     if (typeof m.data !== "string") { play(m.data); return; }
@@ -325,6 +338,7 @@ function connect() {
     if (e.type === "remembering") tag("look", "remembering", 3000);
     if (e.type === "task") taskCard(e);
     if (e.type === "confirm") confirmCard(e);
+    if (e.type === "studio") studioEvent(e);
     if (e.type === "error") { line("meta", "error: " + e.error); const back = emotion; setEmotion("concerned"); emoTimer = setTimeout(() => setEmotion(back), 2500); if (state === "thinking") setState("idle"); }
     if (e.type === "metrics") metrics(e);
   };
@@ -791,7 +805,7 @@ for (const s of ["idle", "listening", "thinking", "speaking", "interrupted"]) { 
 { const b = document.createElement("button"); b.textContent = "▸ agent orb"; b.onclick = () => { orbUntil = performance.now() + 6000; tag("deep", "→ Hermes", 3000); }; $("dev").append(b); }
 document.addEventListener("keydown", (e) => { if (e.key === "?" && document.activeElement !== $("say")) $("dev").classList.toggle("on"); });
 
-fetch("/health").then((r) => r.json()).then((h) => { $("sub").textContent = h.asr.split("/").pop() + " · " + h.brain + " · " + h.voice + (h.voice_lite ? " / " + h.voice_lite : "") + (h.eyes ? " · eyes " + h.eyes : "") + " (" + h.profile + ")"; }).catch(() => {});
+fetch("health").then((r) => r.json()).then((h) => { $("sub").textContent = h.asr.split("/").pop() + " · " + h.brain + " · " + h.voice + (h.voice_lite ? " / " + h.voice_lite : "") + (h.eyes ? " · eyes " + h.eyes : "") + " (" + h.profile + ")"; }).catch(() => {});
 $("fxSel").checked = fxOn;
 $("fxSel").onchange = () => { fxOn = $("fxSel").checked; store.set("boo.fx", fxOn ? "1" : "0"); tag("look", fxOn ? "voice · futuristic on" : "voice · futuristic off", 2000); };
 { const saved = store.get("boo.scan"); if (saved && [...$("scanSel").options].some((o) => o.value === saved)) $("scanSel").value = saved; }

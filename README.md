@@ -511,7 +511,52 @@ A profile names each engine and the turn timing:
   no keep-warm).
 - `turn`: VAD timing (`eager_silence_ms` starts work early, `end_silence_ms` confirms the end of a turn).
 - `eyes`: the camera model; `memory`: Eyes of Kai's URL, the captioner and `interval_s`.
-- `agents` and `agent`: the back agents and the default one.
+- `agents` and `agent`: the back agents and the default one: `acp` (Hermes and other ACP agents), `direct` (any
+  OpenAI-compatible model) or `studio` (Imagination Studio's tools, [below](#studio-tools-boo-as-imagination-studios-voice-director)).
+
+## Studio tools: Boo as Imagination Studio's voice director
+
+The `studio` back agent (`voice_agent/studio.py`) turns spoken requests into actions in
+[Imagination Studio](https://github.com/drowzeys/Imagination-Studio-by-keys-Wasserman), through the Studio's own HTTP
+API, and answers in a sentence or two. The Studio's **Voice panel** (the microphone button in its header) opens this
+page beside the studio, on the Studio's own address, so it also works on a phone that reaches the Studio.
+
+| Say | What happens |
+|---|---|
+| "What's in the render queue?" | What is rendering, its stage and time left, and what is waiting |
+| "How long until the queue is done?" | The jobs' measured times added up (and how many have none) |
+| "Cancel the last job" / "stop the current render" / "cancel everything" | Asked out loud first, then cancelled |
+| "List my films" / "list my Slate shots" / "how many takes does shot 2 have?" | Read from the film saved last, or the one named ("in the film Night Run") |
+| "Start a render of the opening shot at 480p" / "render shot 3" / "re-render it at 720p" | Compiled and queued as the Studio's own Render does, the take logged in the film; a render expected to take longer than `confirm_over_s` (or with no measured time) is asked first |
+| "Make shot 3 darker and re-render it" | The brain rewrites the shot's prompt for the change (the old prompt stays in the shot's History), then renders it |
+| "Play take 2" / "play shot 3" / "play the latest render" | The Studio's Voice panel plays it (take 1 is the first made; a shot alone plays its circled take) |
+
+Shots are named by number in the film's order ("shot 3", "the third shot"), as first, opening or last, by name
+("the shot called Rooftop"), or as "it" for the shot just talked about. Deleting is not offered by voice: the Studio's
+own page has the trash and undo for it.
+
+Set it up in a profile (`profiles/studio.example.json`):
+
+```json
+"agents": {"studio": {"kind": "studio", "label": "Studio", "url": "http://192.168.1.10:7870",
+                      "key_file": "~/.config/ghost-machine/studio-key", "key_env": "STUDIO_ACCESS_KEY_VALUE",
+                      "confirm_over_s": 120, "always": true}},
+"agent": "studio"
+```
+
+- `url`: the Studio's address as this computer reaches it.
+- The Studio's **access key**: a Studio on another computer asks for it. Copy it from the Studio (Settings → Access
+  key, or `bash scripts/studio-key.sh` there) into a file only you can read (`chmod 600`) and name it in `key_file`, or
+  put it in the environment variable named by `key_env`. It is read when needed, never logged or written anywhere
+  else; a new key made in the Studio is picked up from the file. A Studio on the same computer needs none.
+- `confirm_over_s`: renders expected to take longer are asked first (cancels always are).
+- `always`: Studio requests go to this agent even when the page has another agent picked (Hermes for everything else).
+- `brain` (optional): the model that reads requests the patterns miss and rewrites a shot's prompt; the profile's
+  front brain by default.
+
+Run the agent on its own computer (a Mac, or a DGX Spark that is not leading the others), with `VOICE_HOST` set so
+the Studio reaches it, and give the Studio its address in the Voice panel. The voice is Drama 3, as in the other
+profiles; the brain and voice are the profile's own endpoints, so sharing the Studio's engines is a change of URLs.
 
 ## Limitations
 
