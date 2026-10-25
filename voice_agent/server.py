@@ -173,6 +173,10 @@ class Conversation:
                 self.speaking = True
             await self.send(event)
         self.held = None
+        if self.reply is None or self.reply.done():
+            # the quiet turn finished before the person's silence was confirmed (a fast short reply): its finally
+            # already cleared speaking, so the audio_start just let out must not leave it set, or the session goes deaf
+            self.speaking = False
 
     # ----- listening -----
 
