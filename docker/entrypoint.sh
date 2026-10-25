@@ -5,9 +5,13 @@
 #   /models/cosmos3  Cosmos3-Edge converted with tools/cosmos3_edge_to_mlx.py  -> keys build (Cosmos3 on CUDA)
 # A model whose folder is missing is skipped; its URL can point at another server instead (BOLT_URL, DRAMA_URL,
 # COSMOS_URL). KAI=1 also starts Eyes of Kai for camera memory. HERMES_CMD (e.g. "ssh host hermes acp") or
-# DEEP_URL + DEEP_MODEL add a back agent.
+# DEEP_URL + DEEP_MODEL add a back agent. VOICE_ENGINE=lite speaks with Kokoro-82M instead of Drama 3 (no /models/drama
+# needed), both runs the two with a Full/Lite switch in the page; full (Drama 3) is the default.
 set -euo pipefail
 BOLT_PORT=${BOLT_PORT:-8091} DRAMA_PORT=${DRAMA_PORT:-8093} COSMOS_PORT=${COSMOS_PORT:-8099} BOO_PORT=${BOO_PORT:-8095}
+KOKORO_PORT=${KOKORO_PORT:-8197} VOICE_ENGINE=${VOICE_ENGINE:-full}
+case $VOICE_ENGINE in full|lite|both) ;; *) echo "[boo] VOICE_ENGINE must be full, lite or both"; exit 2 ;; esac
+export VOICE_ENGINE
 TF=/opt/tensorfold/bin/tensorfold-native
 KT=/opt/keys-tensorfold/bin
 pids=()
@@ -34,10 +38,14 @@ fi
 # check then drops a stalled take's quiet tail and asks for the rest
 GUARD="--silence-floor-dbfs=-30 --silence-seconds=4 --silence-mid-s=2 --silence-mid-min-voiced-s=1 --silence-redraws=3 --silence-redraw-budget-s=90"
 guard() { case "$("$1" serve --help 2>&1 || true)" in *--silence-mid-min-voiced-s*) echo "$GUARD" ;; esac; }
-if [ -d /models/drama ]; then
+if [ -d /models/drama ] && [ "$VOICE_ENGINE" != lite ]; then
   # shellcheck disable=SC2046 # the guard's flags are separate words
   start drama "$DRAMA_PORT" "$KT/tensorfold-drama3-nvfp4" serve /models/drama --name drama-3 --host 127.0.0.1 \
     --port "$DRAMA_PORT" --voices /voices --default-voice "${VOICE:-vesper}" --no-update-check $(guard "$KT/tensorfold-drama3-nvfp4")
+fi
+if [ "$VOICE_ENGINE" != full ]; then
+  start kokoro "$KOKORO_PORT" /opt/kokoro-venv/bin/python -m voice_agent.kokoro_server --backend torch \
+    --voice "${KOKORO_VOICE:-bf_emma}" --port "$KOKORO_PORT"
 fi
 if [ -d /models/cosmos3 ]; then
   start cosmos3 "$COSMOS_PORT" "$KT/tensorfold-cosmos3" serve /models/cosmos3 --name cosmos3 --host 127.0.0.1 \
@@ -54,6 +62,8 @@ p = json.load(open("/opt/boo/profiles/spark.example.json"))
 p["brain"]["url"] = os.environ.get("BOLT_URL", "http://127.0.0.1:$BOLT_PORT/v1")
 p["voice"]["url"] = os.environ.get("DRAMA_URL", "http://127.0.0.1:$DRAMA_PORT/v1")
 p["voice"]["samples"] = "/voices"
+p["voice_engine"] = os.environ["VOICE_ENGINE"]
+p["voice_lite"] = {"url": os.environ.get("KOKORO_URL", "http://127.0.0.1:$KOKORO_PORT/v1"), "voice": os.environ.get("KOKORO_VOICE", "bf_emma")}
 cosmos = os.environ.get("COSMOS_URL", "http://127.0.0.1:$COSMOS_PORT/v1")
 if os.path.isdir("/models/cosmos3") or "COSMOS_URL" in os.environ:
     p["eyes"]["url"] = cosmos

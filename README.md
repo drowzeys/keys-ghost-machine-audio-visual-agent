@@ -8,10 +8,11 @@
 about half a second (Nemotron 3.5 Bolt and Fish Audio Drama 3), looks through your camera (Cosmos3-Edge), counts your
 fingers exactly (MediaPipe hand tracking), remembers what it saw (Eyes of Kai), looks up live facts, and hands real
 work to a back agent with tools (Hermes over ACP), asking out loud before anything that runs a command or writes. The
-models run locally on TensorFold, on a Mac with Apple silicon or on an NVIDIA DGX Spark.
+models run locally on TensorFold, on a Mac with Apple silicon or on an NVIDIA DGX Spark. A [lite voice](#lite-voice-kokoro-82m)
+(Kokoro-82M) can stand in for Drama 3 where memory or disk is short.
 
 Voices: [drowzeys/keys-ghost-machine-audio-visual-agent on Hugging Face](https://huggingface.co/drowzeys/keys-ghost-machine-audio-visual-agent)
-(14 Drama 3 voices; Vesper is the default).
+(14 Drama 3 voices, Vesper is the default; the lite voice has Kokoro's stock voices, British bf_emma by default).
 
 ## Requirements
 
@@ -24,15 +25,18 @@ Two reference platforms, measured on the live stacks:
 |---|---|---|---|
 | Nemotron 3.5 Bolt (TensorFold) | ≈ 45 GB | ≈ 31 GB | 24 GB |
 | Drama 3 NVFP4 (TensorFold) | ≈ 28 GB wired (21 GB weights) | ≈ 21 GB | 21 GB |
+| *or* Kokoro-82M, the [lite voice](#lite-voice-kokoro-82m) | ≈ 0.7 GB | ≈ 3.5 GB | ≈ 0.4 GB (+ its Python environment: ≈ 1 GB Mac, ≈ 5.5 GB Spark) |
 | Cosmos3-Edge (TensorFold) | ≈ 2.8 GB | ≈ 3.5 GB | 2.4 GB converted (+7.2 GB original, needed only to convert) |
 | Agent + Parakeet v3 | ≈ 3.1 GB (MLX) | ≈ 5.4 GB (NeMo) | ≈ 2.5 GB |
 | Eyes of Kai | < 0.1 GB | < 0.1 GB | small |
 | **Total** | **≈ 79 GB** | **≈ 61 GB** (+≈ 46 GB if weights are staged on /dev/shm for fast starts, optional) | **≈ 50 GB free** (≈ 57 GB while converting Cosmos) |
+| **Total, lite voice** | **≈ 52 GB** | **≈ 44 GB** | **≈ 31 GB free** (Mac), **≈ 36 GB** (Spark) |
 
 - **Mac minimum:** 96 GB unified memory (an M-series Max or Ultra); 128 GB or more recommended. Tested on an M5 Ultra
-  with 256 GB.
-- **DGX Spark minimum:** one DGX Spark (128 GB) with about 64 GB free. Everything fits on one node; the reference
-  setup splits it over two.
+  with 256 GB. The lite voice does not lower this (Bolt sets the floor and a 64 GB Mac is too small either way), but it
+  leaves about 9 GB more room.
+- **DGX Spark minimum:** one DGX Spark (128 GB) with about 64 GB free, or **about 48 GB free with the lite voice**.
+  Everything fits on one node; the reference setup splits it over two.
 - **Software:** TensorFold 1.1.4 (release binaries for Bolt; the Drama 3 and Cosmos3 builds are described under
   Limitations), Python 3.11 or later, Node 22 or later for Eyes of Kai, and a browser with a microphone and camera.
   Safari on an iPhone works over HTTPS (for example through Tailscale Serve).
@@ -60,12 +64,20 @@ curl -fsSL https://raw.githubusercontent.com/drowzeys/keys-ghost-machine-audio-v
 The same script detects the platform. The first run downloads about 55 GB (Bolt 24 GB, Drama 3 22 GB, Cosmos3-Edge
 7.2 GB to convert, then deleted) and takes a while; Parakeet v3 downloads itself the first time the agent starts.
 
+**Lite voice** ([what it is](#lite-voice-kokoro-82m)): add `--voice lite` to skip Drama 3 (about 22 GB less to download)
+and speak with Kokoro-82M, or `--voice both` to install both and get a Full/Lite switch in the page:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/drowzeys/keys-ghost-machine-audio-visual-agent/main/install.sh | bash -s -- --voice lite
+```
+
 | Setting | What it does | Default |
 |---|---|---|
+| `KGM_VOICE` | `full` (Drama 3), `lite` (Kokoro-82M) or `both`; same as `--voice`; a re-run keeps the last choice | `full` |
 | `KGM_HOME` | Install folder | `~/keys-ghost-machine` |
 | `KGM_MODELS` | Model folder | `$KGM_HOME/models` |
 | `KGM_BOLT_DIR`, `KGM_DRAMA_DIR`, `KGM_COSMOS_DIR` | Use model folders you already have (Cosmos3: an already converted one) | in `KGM_MODELS` |
-| `KGM_PORT_BASE` | Move all ports: base+1 Bolt, +8 (Mac) or +3 (Spark) Drama, +9 Cosmos3, +5 page, +70 Kai | 8091, 8098/8093, 8099, 8095, 3870 |
+| `KGM_PORT_BASE` | Move all ports: base+1 Bolt, +8 (Mac) or +3 (Spark) Drama, +9 Cosmos3, +5 page, +70 Kai, +107 Kokoro | 8091, 8098/8093, 8099, 8095, 3870, 8197 |
 | `KGM_START=0` | Install without starting | starts |
 | `KGM_KEEP_SRC=1` | Keep the original Cosmos3-Edge download after converting | deleted |
 | `KGM_FORCE=1` | Install even if the memory or disk check fails | refuses |
@@ -77,12 +89,13 @@ Settings go in front of `bash`, for example `curl -fsSL …/install.sh | KGM_HOM
 
 | Command | Does |
 |---|---|
-| `kgm start` | Starts Bolt, Drama 3, Cosmos3-Edge, Eyes of Kai and the agent, waiting for each to answer |
+| `kgm start` | Starts Bolt, the voice (Drama 3 and/or Kokoro), Cosmos3-Edge, Eyes of Kai and the agent, waiting for each to answer |
 | `kgm stop` | Stops them |
-| `kgm restart [service]` | Restarts everything, or one of `bolt drama cosmos kai agent` |
+| `kgm restart [service]` | Restarts everything, or one of `bolt drama kokoro cosmos kai agent` |
 | `kgm status` | Shows which parts are up, on which ports |
 | `kgm logs [service]` | Follows a log (the agent's by default) |
 | `kgm url` | Prints the page address and the Tailscale line for your phone |
+| `kgm voice full\|lite\|both` | Switches the voice engine and restarts what changes (the engine must be installed: re-run the installer with `--voice`) |
 
 Then open `http://127.0.0.1:8095/`. For your phone, put both on [Tailscale](https://tailscale.com) and run once
 `tailscale serve --bg --https=8443 http://127.0.0.1:8095`; open `https://<this-machine>.<your-tailnet>.ts.net:8443`.
@@ -99,8 +112,52 @@ docker run --gpus all --rm -p 8095:8095 \
   ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:0.1.0
 ```
 
+`-e VOICE_ENGINE=lite` (no Drama mount needed) or `both` picks the voice in an image built from this commit
+(see [docker/README.md](docker/README.md)); the published 0.1.0 image has the full voice only.
+
 **Uninstall:** `kgm stop && rm -rf ~/keys-ghost-machine ~/.local/bin/kgm` (add `~/.cache/huggingface` if nothing else
 uses its downloads).
+
+## Lite voice (Kokoro-82M)
+
+Drama 3 is the full voice: expressive, with the 14 custom voices, and the part of the stack that takes the most memory
+after Bolt. The lite voice swaps it for [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) (hexgrad, Apache-2.0),
+an 82-million-parameter speech model, behind the same API (`voice_agent/kokoro_server.py`: MLX on the Mac through
+mlx-audio, PyTorch CUDA on the DGX Spark). Everything else in Boo stays the same.
+
+Measured on the live stacks with the same 16 questions and the same client:
+
+| | DGX Spark, lite | DGX Spark, full | Mac, lite | Mac, full |
+|---|---|---|---|---|
+| Voice-to-voice, median | **0.33 s** | 0.55–0.77 s | 0.56–0.64 s | 0.47–0.60 s |
+| Voice engine memory | **≈ 3.5 GB** | ≈ 42 GB | **≈ 0.7 GB** | ≈ 10 GB |
+| Whole stack in use | **≈ 62 GB** | ≈ 101 GB | **≈ 55 GB** | ≈ 64 GB |
+| Voice engine on disk | ≈ 0.4 GB | 21 GB | ≈ 0.4 GB | 21 GB |
+
+These are memory in use while talking, read from the running stacks (the DGX Spark one with its weights staged in
+memory); the [Requirements](#requirements) table counts what each part needs at load.
+
+Kokoro is not autoregressive: a sentence's audio comes all at once, about 50–90 ms for a short first chunk on the
+Spark's GPU, so it needs no keep-warm (profiles set `keep_warm: false` for it). Its leading ~250 ms of silence is cut.
+
+**How to choose.** Take the full voice (Drama 3) when you have the memory: it sounds more alive, it has the 14 voices
+made for Boo and it speaks more languages. Take the lite voice on a DGX Spark that shares its memory with other work,
+when disk is short, or when you want the fastest replies on a Spark; take `both` to compare them in the page.
+
+**What lite gives up:**
+
+- The 14 custom Drama 3 voices and voice cloning; Kokoro has its own stock voices only.
+- Drama 3's expressiveness, and the more expressive delivery still to come on it; Kokoro reads evenly.
+- Languages: Boo's lite voice speaks English only (American and British voices). Kokoro itself also has Spanish,
+  French, Italian, Portuguese, Hindi, Japanese and Mandarin voices, but no German; Drama 3 covers more, German included.
+
+**Voices.** `bf_emma` (British female, warm and clear) is the default. Also offered: `bf_isabella`, `bf_alice`,
+`bf_lily`, `bm_george`, `bm_fable`, `bm_lewis`, `bm_daniel` (British), `af_heart` (Kokoro's best-rated voice),
+`af_bella`, `af_nicole`, `af_sarah`, `am_michael`, `am_fenrir`, `am_puck` (American). Previews of a few are in the
+[Hugging Face repo](https://huggingface.co/drowzeys/keys-ghost-machine-audio-visual-agent/tree/main/previews/kokoro).
+
+**Turning it on:** `install.sh --voice lite` (or `both`), `kgm voice lite` on an install that has it, `VOICE_ENGINE=lite`
+for Docker, or by hand `./serve-kokoro.sh` then `./serve.sh profiles/mac.json lite` (see [Profiles](#profiles)).
 
 ## See it work
 
@@ -138,7 +195,7 @@ flowchart TD
   R -->|Everything else| BOLT[Bolt: reply with mood tags]
   BOLT -->|deep tag or a promise to check| HER
   BOLT --> V[Sentence chunks, the first after 5 words]
-  V --> D[Drama 3 in the chosen voice] --> S[Speaker in the page]
+  V --> D[Drama 3, or Kokoro-82M as the lite voice, in the chosen voice] --> S[Speaker in the page]
   CAMF[Camera frames while the camera is on] --> MEM[Cosmos3 caption every scan interval] --> KAI[Eyes of Kai timeline]
   KAI -->|what was I doing earlier?| BOLT
 ```
@@ -186,6 +243,11 @@ and Bolt's first token at 95 ms.
 voice-prefix cache, and the Cosmos3-Edge ports for Metal and CUDA. The DGX Spark's Drama 3 still runs on
 plotarmordev's NVFP4 fork, because stock 1.1.4 refuses the pruned checkpoint.
 
+**Fast short replies no longer deafen a session.** A quick reply such as "I'm on it." could finish before the
+person's silence was confirmed; letting it out then marked Boo as still speaking after the reply had ended, and the
+session stopped listening. Boo now clears that state when the reply is already done (found with the lite voice, whose
+short replies finish fastest; since the fix every turn was heard: 64 of 64 in testing, 20 of 20 in an install test).
+
 **Long lines that go quiet.** Drama 3 sometimes speaks the first sentence of a long line and then only silence or a
 flat hum near −36 dBFS until the frame cap, on about 1 in 5 paragraph-length inputs, and the same input every time
 (the seed comes from the prompt; [ashhart/TensorFold#1275](https://github.com/ashhart/TensorFold/issues/1275)). It is
@@ -201,8 +263,10 @@ take itself: after 3 s under −30 dBFS it drops the quiet tail and asks for the
 
 - **Name**: what the assistant is called (Boo by default); it answers to it, and the header follows.
 - **Agent**: the back agent (Hermes over ACP, or a direct OpenAI-compatible model).
-- **Voice**: any voice the Drama 3 server loaded, with its description; **Futuristic** adds a light chorus, a short
-  airy echo and a treble lift in the browser (no server cost).
+- **Voice engine** (only when both are running, `--voice both`): Full (Drama 3) or Lite (Kokoro-82M), per
+  conversation; each remembers its own voice on the device.
+- **Voice**: any voice the voice engine offers (Drama 3's loaded voices, or Kokoro's), with its description;
+  **Futuristic** adds a light chorus, a short airy echo and a treble lift in the browser (no server cost).
 - **Camera scan**: how often the camera is captioned into memory while the camera is on: every 1, 2, 3 (default), 5,
   10 or 30 seconds, or every 1, 5 or 15 minutes.
 - **Memory**: how long captions are kept: 1, 2 (default), 3 or 5 days, or 1 week.
@@ -247,6 +311,12 @@ What the one-shot installer does, by hand:
      `--silence-floor-dbfs=-30 --silence-seconds=4 --silence-mid-s=2 --silence-mid-min-voiced-s=1 --silence-redraws=3
      --silence-redraw-budget-s=90` (see [Measured speed](#measured-speed)).
    - Cosmos3-Edge with `--vision` and `--keep-warm 0`, on `:8099`.
+   - Or, for the lite voice instead of (or beside) Drama 3: Kokoro-82M in its own environment, on `:8197`:
+     ```sh
+     python3 -m venv kokoro-venv
+     kokoro-venv/bin/pip install -r requirements-kokoro-mac.txt   # Spark: install CUDA 13 PyTorch first, then requirements-kokoro-spark.txt
+     ./serve-kokoro.sh                                            # KOKORO_VOICE=af_heart picks another default
+     ```
 2. **Eyes of Kai.** Clone [tonyd2wild/eyes-of-kai](https://github.com/tonyd2wild/eyes-of-kai), apply
    `patches/eyes-of-kai-retention.patch` (`git apply`), set `PORT=3870` and `BIND_HOST=127.0.0.1` in its `.env`, and
    start it with Node 22 (`node src/server.js`).
@@ -255,7 +325,7 @@ What the one-shot installer does, by hand:
    python3 -m venv venv
    venv/bin/pip install -r requirements-mac.txt      # or requirements-spark.txt on a DGX Spark
    cp profiles/mac.example.json profiles/mac.json   # edit ports, voices folder and back agents
-   ./serve.sh profiles/mac.json
+   ./serve.sh profiles/mac.json                     # add "lite" or "both" for the lite voice
    ```
    Open `http://127.0.0.1:8095/`. For a phone, serve it over HTTPS (browsers only give the microphone and camera to
    secure pages), for example with `tailscale serve --https=8443 http://127.0.0.1:8095`.
@@ -263,7 +333,8 @@ What the one-shot installer does, by hand:
    `command` to `["ssh", "-T", "user@host", "hermes", "acp"]`. The `deep` agent is any OpenAI-compatible endpoint.
 
 `python -m voice_agent.bench ws://127.0.0.1:8095/ws a.wav b.wav …` measures voice-to-voice from spoken questions as
-16 kHz mono WAV files. No recordings ship with the repository; make test questions with a synthetic Drama 3 voice, for
+16 kHz mono WAV files (any voice engine's sample rate; `--agent NAME` hands deep requests to another back agent, for
+example a tool-free one, while measuring). No recordings ship with the repository; make test questions with a synthetic Drama 3 voice, for
 example:
 
 ```sh
@@ -279,7 +350,11 @@ A profile names each engine and the turn timing:
 - `asr`: `parakeet-mlx` (Mac) or `nemo` (Spark) with the model id.
 - `brain`: the front model's URL, model name, system prompt and sampling.
 - `voice`: the Drama 3 URL, default voice, voices folder (for previews and descriptions) and `first_words` (the first
-  spoken chunk is cut after this many words).
+  spoken chunk is cut after this many words). `keep_warm: false` stops the warm-up requests (for an engine that starts
+  at once).
+- `voice_engine`: `full` (default), `lite` or `both`; `--voice` on the command line or `VOICE_ENGINE` overrides it.
+  `voice_lite` changes the lite voice's settings (default: Kokoro-82M at `http://127.0.0.1:8197/v1`, voice `bf_emma`,
+  no keep-warm).
 - `turn`: VAD timing (`eager_silence_ms` starts work early, `end_silence_ms` confirms the end of a turn).
 - `eyes`: the camera model; `memory`: Eyes of Kai's URL, the captioner and `interval_s`.
 - `agents` and `agent`: the back agents and the default one.
@@ -299,7 +374,8 @@ A profile names each engine and the turn timing:
 - Live facts come from web search snippets, which can be out of date; ask the back agent for anything that needs
   digging.
 - Fish Audio's licence applies to Drama 3 speech: hosted services that generate speech for third parties need a
-  separate licence from Fish Audio.
+  separate licence from Fish Audio. Kokoro-82M is Apache-2.0.
+- The lite voice is English only in Boo, has no mood in its delivery, and cannot clone or use the Drama 3 voices.
 
 ## Questions and issues
 
@@ -321,6 +397,13 @@ The code is MIT (LICENSE). Everything below keeps its own licence.
 | Drama 3 | The voice (speech synthesis); the 14 named voices are takes of its built-in voice | Fish Audio | Fish Audio Community License | [Hugging Face](https://huggingface.co/fishaudio/drama-3) |
 | drama-3-NVFP4-Pruned, NVFP4 CUDA fork and named voices | The 4-bit pruned Drama 3 checkpoint, the DGX Spark's Drama engine and `--voices` | plotarmordev | Fish Audio Community License (weights) · Apache-2.0 (engine) | [checkpoint](https://huggingface.co/plotarmordev/drama-3-NVFP4-Pruned) · [fork](https://github.com/plotarmordev/TensorFold) |
 | TensorFold | The engine for Bolt, Drama 3 and Cosmos3-Edge, on Metal and CUDA | Ash Hart | Apache-2.0 | [GitHub](https://github.com/ashhart/TensorFold) |
+| Kokoro-82M | The lite voice (optional, instead of Drama 3) | hexgrad | Apache-2.0 | [Hugging Face](https://huggingface.co/hexgrad/Kokoro-82M) |
+| kokoro | Runs Kokoro-82M on PyTorch (DGX Spark) | hexgrad | Apache-2.0 | [GitHub](https://github.com/hexgrad/kokoro) |
+| mlx-audio | Runs Kokoro-82M on MLX (Mac); weights from `mlx-community/Kokoro-82M-bf16` | Prince Canuma (Blaizzy) | MIT | [GitHub](https://github.com/Blaizzy/mlx-audio) |
+| misaki | Kokoro's text-to-phoneme step (G2P) | hexgrad | Apache-2.0 | [GitHub](https://github.com/hexgrad/misaki) |
+| spaCy and en_core_web_sm | English tokenising and tagging inside misaki | Explosion | MIT | [GitHub](https://github.com/explosion/spaCy) |
+| espeak-ng (through phonemizer-fork and espeakng-loader) | misaki's fallback pronunciation for words its dictionary lacks | espeak-ng contributors | GPL-3.0 | [GitHub](https://github.com/espeak-ng/espeak-ng) |
+| StyleTTS 2 | The architecture Kokoro-82M is built on (with an iSTFTNet decoder) | Yinghao Aaron Li et al. | MIT | [GitHub](https://github.com/yl4579/StyleTTS2) |
 | Eyes of Kai | The continuity log: timestamped captions so Boo can answer about the past | tonyd2wild | MIT | [GitHub](https://github.com/tonyd2wild/eyes-of-kai) |
 | Hermes Agent | The back agent with tools and skills, over ACP | Nous Research | see repository | [GitHub](https://github.com/NousResearch/hermes-agent) |
 | qwen-audio-agent | Design inspiration: the frontstage/backstage split (a fast voice in front, a tool-using agent behind that reports back); no code from it is used | Qwen Audio team | Apache-2.0 | [GitHub](https://github.com/QwenAudio/qwen-audio-agent) |

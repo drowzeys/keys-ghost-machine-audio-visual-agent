@@ -2,7 +2,7 @@
 voice-to-voice latency (the end of the person's speech to the first reply audio received). With --barge, it speaks the
 next utterance one second into each reply and measures how fast the agent stops.
 
-    python -m voice_agent.bench ws://127.0.0.1:8095/ws asrset/u00.wav asrset/u01.wav [--barge]
+    python -m voice_agent.bench ws://127.0.0.1:8095/ws asrset/u00.wav asrset/u01.wav [--barge] [--agent NAME]
 """
 
 from __future__ import annotations
@@ -43,14 +43,17 @@ async def main() -> None:
     parser.add_argument("url")
     parser.add_argument("wavs", nargs="+")
     parser.add_argument("--barge", action="store_true")
+    parser.add_argument("--agent", help="hand deep requests to this agent (e.g. a tool-free direct one) instead of the profile's")
     args = parser.parse_args()
     results = []
     async with websockets.connect(args.url, max_size=2**24) as ws:
         assert json.loads(await ws.recv())["type"] == "ready"
+        if args.agent:
+            await ws.send(json.dumps({"type": "agent", "name": args.agent}))
         for n, path in enumerate(args.wavs):
             audio, rate = sf.read(path, dtype="float32")
             assert rate == 16000, path
-            got = {"audio_bytes": 0}
+            got = {"audio_bytes": 0, "rate": 44100}
             first_audio = asyncio.get_running_loop().create_future()
             done = asyncio.get_running_loop().create_future()
             interrupted = asyncio.get_running_loop().create_future()
@@ -64,6 +67,8 @@ async def main() -> None:
                             first_audio.set_result(time.perf_counter())
                         continue
                     e = json.loads(m)
+                    if e["type"] == "audio_start":
+                        got["rate"] = e.get("sample_rate", 44100)
                     if e["type"] in ("transcript", "reply"):
                         got.setdefault(e["type"], []).append(e["text"])
                     if e["type"] == "speech_end":
@@ -105,7 +110,7 @@ async def main() -> None:
                     pass
             task.cancel()
             row.update({"ends": got.get("ends", 0), "heard": " ".join(got.get("transcript", [])), "said": " ".join(got.get("reply", [])),
-                        "reply_audio_s": round(got["audio_bytes"] / 2 / 44100, 2), **{"srv_" + k: v for k, v in got.get("server", {}).items()}})
+                        "reply_audio_s": round(got["audio_bytes"] / 2 / got["rate"], 2), **{"srv_" + k: v for k, v in got.get("server", {}).items()}})
             results.append(row)
             print(json.dumps(row), flush=True)
             await asyncio.sleep(0.5)

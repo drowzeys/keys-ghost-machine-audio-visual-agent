@@ -126,6 +126,7 @@
   <div id="pickers">
     <div class="pick on" id="namePick" title="What the assistant is called; it answers to this name"><span>Name</span><input id="nameIn" maxlength="24" value="Boo" autocomplete="off" spellcheck="false" aria-label="Assistant name"></div>
     <div class="pick" id="agentPick"><span>Agent</span><select id="agentSel" aria-label="Back agent"></select></div>
+    <div class="pick" id="enginePick" title="Full: Drama 3, expressive, its own voices. Lite: Kokoro-82M, small and fast, English only"><span>Voice engine</span><select id="engineSel" aria-label="Voice engine"></select></div>
     <div class="pick" id="voicePick"><span>Voice</span><select id="voiceSel" aria-label="Voice"></select>
       <label class="fx" for="fxSel">Futuristic <input type="checkbox" id="fxSel" aria-label="Futuristic voice effect"></label></div>
     <div class="pick on" id="scanPick" title="How often Boo writes down what the camera sees, while the camera is on"><span>Camera scan</span><select id="scanSel" aria-label="How often Boo scans the camera">
@@ -284,7 +285,7 @@ function fill(sel, list, current, key, type) {
   const pick = list.some((it) => it.id === want) ? want : current;
   sel.value = pick || (list[0] && list[0].id) || "";
   if (pick && pick !== current) send({ type, name: pick, quiet: true });  // a remembered choice: no sample line
-  sel.onchange = () => { store.set(key, sel.value); send({ type, name: sel.value }); tag(type === "agent" ? "deep" : "look", (type === "agent" ? "agent · " : "voice · ") + sel.selectedOptions[0].textContent, 2500); };
+  sel.onchange = () => { store.set(key, sel.value); send({ type, name: sel.value }); tag(type === "agent" ? "deep" : "look", ({ agent: "agent · ", engine: "voice engine · " }[type] || "voice · ") + sel.selectedOptions[0].textContent, 2500); };
   sel.parentElement.classList.add("on"); $("pickers").classList.add("on");
 }
 
@@ -296,7 +297,9 @@ function connect() {
     const e = JSON.parse(m.data);
     if (e.type === "ready") { $("state").textContent = "ready"; setState("idle"); send({ type: "scan", seconds: +$("scanSel").value }); send({ type: "name", name: assistantName() }); send({ type: "keep", days: +$("keepSel").value }); }
     if (e.type === "agents" && e.list && e.list.length) fill($("agentSel"), e.list, e.current, "boo.agent", "agent");
-    if (e.type === "voices" && e.list && e.list.length) fill($("voiceSel"), e.list, e.current, "boo.voice2", "voice");
+    // each voice engine remembers its own voice on this device (Drama 3's names mean nothing to Kokoro)
+    if (e.type === "voices" && e.list && e.list.length) fill($("voiceSel"), e.list, e.current, e.engine === "lite" ? "boo.voice.lite" : "boo.voice2", "voice");
+    if (e.type === "engines" && e.list && e.list.length > 1) fill($("engineSel"), e.list, e.current, "boo.engine", "engine");
     if (e.type === "speech_start") { $("state").textContent = "listening…"; setState("listening"); }
     if (e.type === "speech_end") { $("state").textContent = "thinking…"; setState("thinking"); }
     if (e.type === "transcript" && e.text) { line("you", e.text); agentLine = null; }
@@ -788,7 +791,7 @@ for (const s of ["idle", "listening", "thinking", "speaking", "interrupted"]) { 
 { const b = document.createElement("button"); b.textContent = "▸ agent orb"; b.onclick = () => { orbUntil = performance.now() + 6000; tag("deep", "→ Hermes", 3000); }; $("dev").append(b); }
 document.addEventListener("keydown", (e) => { if (e.key === "?" && document.activeElement !== $("say")) $("dev").classList.toggle("on"); });
 
-fetch("/health").then((r) => r.json()).then((h) => { $("sub").textContent = h.asr.split("/").pop() + " · " + h.brain + " · " + h.voice + (h.eyes ? " · eyes " + h.eyes : "") + " (" + h.profile + ")"; }).catch(() => {});
+fetch("/health").then((r) => r.json()).then((h) => { $("sub").textContent = h.asr.split("/").pop() + " · " + h.brain + " · " + h.voice + (h.voice_lite ? " / " + h.voice_lite : "") + (h.eyes ? " · eyes " + h.eyes : "") + " (" + h.profile + ")"; }).catch(() => {});
 $("fxSel").checked = fxOn;
 $("fxSel").onchange = () => { fxOn = $("fxSel").checked; store.set("boo.fx", fxOn ? "1" : "0"); tag("look", fxOn ? "voice · futuristic on" : "voice · futuristic off", 2000); };
 { const saved = store.get("boo.scan"); if (saved && [...$("scanSel").options].some((o) => o.value === saved)) $("scanSel").value = saved; }

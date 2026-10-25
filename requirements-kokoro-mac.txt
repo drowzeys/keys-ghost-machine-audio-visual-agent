@@ -1,0 +1,12 @@
+# the lite voice (Kokoro-82M on MLX), in its own environment; versions are the ones it was tested with
+mlx-audio==0.6.1
+misaki[en]==0.9.4
+spacy==3.8.16
+en_core_web_sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
+# newer preshed makes spaCy 3.8's tokenizer raise OverflowError
+preshed==3.0.10
+cymem==2.0.11
+murmurhash==1.0.13
+fastapi>=0.162
+uvicorn[standard]>=0.54
+numpy>=2.4

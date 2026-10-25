@@ -1,4 +1,5 @@
 # Boo (keys-ghost-machine-audio-visual-agent) for an NVIDIA DGX Spark (linux/arm64, CUDA 13).
+# VOICE_ENGINE=full (Drama 3, default), lite (Kokoro-82M) or both (a Full/Lite switch in the page).
 # Model weights are not included: mount them under /models (see docker/README.md).
 FROM nvcr.io/nvidia/pytorch:26.07-py3
 
@@ -24,8 +25,13 @@ WORKDIR /opt/boo
 COPY voice_agent ./voice_agent
 COPY profiles ./profiles
 COPY patches ./patches
-COPY silero_vad.onnx requirements.txt requirements-spark.txt LICENSE CREDITS.md README.md ./
+COPY silero_vad.onnx requirements.txt requirements-spark.txt requirements-kokoro-spark.txt LICENSE CREDITS.md README.md ./
 RUN pip install -r requirements.txt "nemo_toolkit[asr]>=3.0"
+
+# The optional lite voice, Kokoro-82M (started when VOICE_ENGINE is lite or both), in its own environment on the
+# image's PyTorch: misaki pins spaCy's tokenizer libraries. Its weights download into /models/hf-cache on first start.
+RUN python3 -m venv --system-site-packages /opt/kokoro-venv \
+    && /opt/kokoro-venv/bin/pip install -r requirements-kokoro-spark.txt
 
 # Eyes of Kai (MIT, tonyd2wild) with the retention patch, started only when KAI=1
 RUN git clone -q https://github.com/tonyd2wild/eyes-of-kai /opt/eyes-of-kai && cd /opt/eyes-of-kai \

@@ -2,18 +2,21 @@
 # One-shot install of Keys Ghost Machine (Boo) on a DGX Spark or an Apple silicon Mac:
 #
 #   curl -fsSL https://raw.githubusercontent.com/drowzeys/keys-ghost-machine-audio-visual-agent/main/install.sh | bash
+#   … | bash -s -- --voice lite      the lite voice (Kokoro-82M) instead of Drama 3: about 21 GB less disk, less memory
+#   … | bash -s -- --voice both      both voices, with a Full/Lite switch in the page
 #
 # Everything goes under one folder (~/keys-ghost-machine unless KGM_HOME says otherwise): the agent, the TensorFold
 # builds, a Python environment, Eyes of Kai, the voices and the models. Running it again picks up where it stopped and
 # skips what is already there. No sudo. When it finishes, `kgm start` runs the whole stack (it starts it for you unless
 # KGM_START=0). Settings, all optional:
 #
+#   KGM_VOICE        full (Drama 3), lite (Kokoro-82M) or both  (full; same as --voice; a re-run keeps the last one)
 #   KGM_HOME         install folder                          (~/keys-ghost-machine)
 #   KGM_MODELS       model folder                            ($KGM_HOME/models)
 #   KGM_BOLT_DIR     an existing Bolt folder to use          ($KGM_MODELS/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB)
 #   KGM_DRAMA_DIR    an existing Drama 3 NVFP4 folder        ($KGM_MODELS/drama-3-NVFP4-Pruned)
 #   KGM_COSMOS_DIR   an existing converted Cosmos3 folder    ($KGM_MODELS/cosmos3-tf)
-#   KGM_PORT_BASE    move every port: base+1 Bolt, +3 or +8 Drama, +9 Cosmos3, +5 agent, +70 Kai (unset: 8091 …)
+#   KGM_PORT_BASE    move every port: base+1 Bolt, +3 or +8 Drama, +9 Cosmos3, +5 agent, +70 Kai, +107 Kokoro (unset: 8091 …)
 #   KGM_START=0      install only, don't start
 #   KGM_KEEP_SRC=1   keep the original Cosmos3-Edge download after converting it (7.2 GB)
 #   KGM_FORCE=1      install even if the memory or disk check fails
@@ -36,6 +39,23 @@ say()  { printf '\n\033[1;35m==>\033[0m \033[1m%s\033[0m\n' "$*"; }
 note() { printf '    %s\n' "$*"; }
 die()  { printf '\n\033[1;31mxx\033[0m %s\n' "$*" >&2; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
+
+# the voice: full = Drama 3 (expressive, 14 voices), lite = Kokoro-82M (small and fast, English), both = a page switch
+VOICE_MODE=${KGM_VOICE:-}
+while [ $# -gt 0 ]; do
+  case $1 in
+    --voice) VOICE_MODE=${2:-}; shift 2 || shift ;;
+    --voice=*) VOICE_MODE=${1#*=}; shift ;;
+    *) die "unknown option $1 (the installer takes --voice full|lite|both)" ;;
+  esac
+done
+if [ -z "$VOICE_MODE" ] && [ -f "$KGM_HOME/kgm.env" ]; then  # a re-run keeps the voice it was installed with
+  VOICE_MODE=$(sed -n 's/^VOICE_MODE=//p' "$KGM_HOME/kgm.env")
+fi
+VOICE_MODE=${VOICE_MODE:-full}
+case $VOICE_MODE in full|lite|both) ;; *) die "--voice must be full, lite or both (not '$VOICE_MODE')" ;; esac
+DRAMA=1; [ "$VOICE_MODE" = lite ] && DRAMA=0
+KOKORO=1; [ "$VOICE_MODE" = full ] && KOKORO=0
 
 # Homebrew's tools on a Mac, and anything this installer put in place before
 [ -d /opt/homebrew/bin ] && PATH="/opt/homebrew/bin:$PATH"
@@ -60,7 +80,7 @@ case $PLATFORM in
     MACOS=$(sw_vers -productVersion 2>/dev/null || echo 0)
     [ "${MACOS%%.*}" -ge 26 ] 2>/dev/null || [ -n "${KGM_FORCE:-}" ] || die "macOS 26 or later is needed for Metal 4 (this is $MACOS)."
     MEM_GB=${KGM_MEM_GB:-$(( $(sysctl -n hw.memsize) / 1073741824 ))}
-    MEM_NEED=96; MEM_WHAT="unified memory"
+    MEM_NEED=96; MEM_WHAT="unified memory"   # lite too: Bolt sets the floor (lite frees ≈ 9 GB)
     note "Apple silicon Mac, macOS $MACOS, $MEM_GB GB unified memory"
     ;;
   spark)
@@ -68,8 +88,11 @@ case $PLATFORM in
     case $GPU in *GB10*|"") ;; *) note "GPU is '$GPU'; Boo is built and tested for the GB10 (DGX Spark).";; esac
     MEM_GB=${KGM_MEM_GB:-$(awk '/MemAvailable/{print int($2/1048576)}' /proc/meminfo)}
     MEM_NEED=64; MEM_WHAT="free memory (MemAvailable)"
+    [ "$VOICE_MODE" = lite ] && MEM_NEED=48   # Kokoro ≈ 3.5 GB instead of Drama 3's ≈ 21 GB and more
+    [ "$VOICE_MODE" = both ] && MEM_NEED=68
     CUDA_LIBS=${CUDA_LIBS:-/usr/local/cuda/lib64}
     note "DGX Spark (${GPU:-NVIDIA GPU}), $MEM_GB GB free memory"
+    [ "$VOICE_MODE" = full ] || note "voice: $VOICE_MODE"
     ls "$CUDA_LIBS"/libcublasLt.so.13* >/dev/null 2>&1 || \
       note "warning: no CUDA 13 cuBLAS in $CUDA_LIBS (DGX OS has it there; set CUDA_LIBS to its folder)"
     ;;
@@ -88,7 +111,10 @@ fi
 ready() { [ -f "$1/.kgm-ready" ] || { [ -n "${2:-}" ] && [ -f "$1/$2" ]; }; }
 NEED_GB=4
 ready "$BOLT_DIR" config.json || NEED_GB=$((NEED_GB + 24))
-ready "$DRAMA_DIR" config.json || NEED_GB=$((NEED_GB + 22))
+[ "$DRAMA" = 1 ] && { ready "$DRAMA_DIR" config.json || NEED_GB=$((NEED_GB + 22)); }
+if [ "$KOKORO" = 1 ] && [ ! -d "$KGM_HOME/kokoro-venv/lib" ]; then   # Kokoro, spaCy and its environment (CUDA: + PyTorch)
+  if [ "$PLATFORM" = spark ]; then NEED_GB=$((NEED_GB + 7)); else NEED_GB=$((NEED_GB + 2)); fi
+fi
 ready "$COSMOS_DIR" model.safetensors || NEED_GB=$((NEED_GB + 10))
 [ "$PLATFORM" = spark ] && [ ! -d "$KGM_HOME/venv/lib" ] && NEED_GB=$((NEED_GB + 8))   # PyTorch (CUDA) and NeMo
 mkdir -p "$KGM_HOME" "$KGM_MODELS"
@@ -193,7 +219,8 @@ download() {  # repo dir [include patterns...]
 say "Models (skipped when already there)"
 if ready "$BOLT_DIR" config.json; then note "Bolt: $BOLT_DIR"; else
   note "Nemotron 3.5 Bolt 74B-A9B (about 24 GB)…"; download nvidia/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB "$BOLT_DIR"; fi
-if ready "$DRAMA_DIR" config.json; then note "Drama 3: $DRAMA_DIR"; else
+if [ "$DRAMA" = 0 ]; then note "Drama 3: not needed (lite voice)"
+elif ready "$DRAMA_DIR" config.json; then note "Drama 3: $DRAMA_DIR"; else
   note "Drama 3 NVFP4 pruned (about 22 GB; Fish Audio's Drama 3 licence applies)…"
   download plotarmordev/drama-3-NVFP4-Pruned "$DRAMA_DIR"; fi
 if ready "$COSMOS_DIR" model.safetensors; then note "Cosmos3-Edge: $COSMOS_DIR"; else
@@ -218,22 +245,38 @@ if ready "$COSMOS_DIR" model.safetensors; then note "Cosmos3-Edge: $COSMOS_DIR";
 fi
 note "Parakeet v3 downloads itself the first time the agent starts (about 2.5 GB)."
 
-say "Voices"
 VOICES=$KGM_HOME/voices
+if [ "$DRAMA" = 1 ]; then
+say "Voices"
 if [ ! -f "$VOICES/.kgm-ready" ]; then
   "$HF" download "$REPO" --local-dir "$KGM_HOME/hf-voices" --include "voices/$PLATFORM/*" --include "previews/*" >/dev/null
   mkdir -p "$VOICES" && cp "$KGM_HOME/hf-voices/voices/$PLATFORM/"*.json "$VOICES/" && cp "$KGM_HOME/hf-voices/previews/"*.wav "$VOICES/"
   rm -rf "$KGM_HOME/hf-voices" && touch "$VOICES/.kgm-ready"
 fi
 note "$(ls "$VOICES"/*.json | wc -l | tr -d ' ') voices in $VOICES (Vesper is the default)"
+fi
+
+if [ "$KOKORO" = 1 ]; then
+  say "Lite voice: Kokoro-82M"
+  KV=$KGM_HOME/kokoro-venv   # its own environment: misaki pins spaCy's tokenizer libraries
+  [ -x "$KV/bin/python" ] || uv venv -q --python 3.12 "$KV"
+  if [ "$PLATFORM" = spark ] && ! "$KV/bin/python" -c "import torch, sys; sys.exit(0 if torch.cuda.is_available() else 1)" 2>/dev/null; then
+    note "PyTorch for CUDA 13 (aarch64), for Kokoro"
+    uv pip install -q --python "$KV/bin/python" torch --index-url https://download.pytorch.org/whl/cu130
+  fi
+  uv pip install -q --python "$KV/bin/python" -r "$APP/requirements-kokoro-$PLATFORM.txt"
+  if [ "$PLATFORM" = mac ]; then KOKORO_REPO=mlx-community/Kokoro-82M-bf16; else KOKORO_REPO=hexgrad/Kokoro-82M; fi
+  "$HF" download "$KOKORO_REPO" >/dev/null   # about 0.4 GB into the Hugging Face cache, with its voices
+  note "Kokoro-82M ($KOKORO_REPO) in $KV; British voice bf_emma is the default"
+fi
 
 # ---------------------------------------------------------------------------------------------------------- ports
 if [ -n "${KGM_PORT_BASE:-}" ]; then
   B=$KGM_PORT_BASE
-  BOLT_PORT=$((B + 1)); COSMOS_PORT=$((B + 9)); AGENT_PORT=$((B + 5)); KAI_PORT=$((B + 70))
+  BOLT_PORT=$((B + 1)); COSMOS_PORT=$((B + 9)); AGENT_PORT=$((B + 5)); KAI_PORT=$((B + 70)); KOKORO_PORT=$((B + 107))
   if [ "$PLATFORM" = mac ]; then DRAMA_PORT=$((B + 8)); else DRAMA_PORT=$((B + 3)); fi
 else
-  BOLT_PORT=8091; COSMOS_PORT=8099; AGENT_PORT=8095; KAI_PORT=3870
+  BOLT_PORT=8091; COSMOS_PORT=8099; AGENT_PORT=8095; KAI_PORT=3870; KOKORO_PORT=8197
   if [ "$PLATFORM" = mac ]; then DRAMA_PORT=8098; else DRAMA_PORT=8093; fi
 fi
 
@@ -274,6 +317,8 @@ p["brain"]["url"] = "http://127.0.0.1:$BOLT_PORT/v1"
 p["voice"]["url"] = "http://127.0.0.1:$DRAMA_PORT/v1"
 p["voice"]["samples"] = "$VOICES"
 p["voice"]["voice"] = "vesper"
+p["voice_engine"] = "$VOICE_MODE"   # full, lite or both; kgm voice changes it
+p["voice_lite"] = {"url": "http://127.0.0.1:$KOKORO_PORT/v1", "voice": "bf_emma"}   # Kokoro-82M (see voice_agent/server.py)
 p["eyes"] = {"url": "http://127.0.0.1:$COSMOS_PORT/v1", "model": "cosmos3"}
 p["memory"]["url"] = "http://127.0.0.1:$KAI_PORT"
 p["memory"]["captioner"] = {"url": "http://127.0.0.1:$COSMOS_PORT/v1", "model": "cosmos3"}
@@ -309,18 +354,25 @@ DRAMA_PORT=$DRAMA_PORT
 COSMOS_PORT=$COSMOS_PORT
 KAI_PORT=$KAI_PORT
 AGENT_PORT=$AGENT_PORT
+KOKORO_PORT=$KOKORO_PORT
+VOICE_MODE=$VOICE_MODE
 EOF
 cat > "$KGM_HOME/bin/kgm" <<'KGM'
 #!/usr/bin/env bash
-# kgm start|stop|restart [service] · status · logs [service] · url — Boo's stack: bolt drama cosmos kai agent
+# kgm start|stop|restart [service] · status · logs [service] · url · voice full|lite|both — Boo's stack:
+# bolt, drama (full voice) and/or kokoro (lite voice), cosmos, kai, agent
 set -uo pipefail
 H="$(cd "$(dirname "$0")/.." && pwd)"
 . "$H/kgm.env"
 [ -d /opt/homebrew/bin ] && PATH="/opt/homebrew/bin:$PATH"
 PATH="$KGM_HOME/tools/bin:$KGM_HOME/tools/node/bin:$PATH"
 [ -n "${CUDA_LIBS:-}" ] && export LD_LIBRARY_PATH="$CUDA_LIBS:${LD_LIBRARY_PATH:-}"
-ALL="bolt drama cosmos kai agent"
-port() { case $1 in bolt) echo "$BOLT_PORT";; drama) echo "$DRAMA_PORT";; cosmos) echo "$COSMOS_PORT";; kai) echo "$KAI_PORT";; agent) echo "$AGENT_PORT";; esac; }
+VOICE_MODE=${VOICE_MODE:-full}; KOKORO_PORT=${KOKORO_PORT:-8197}
+services() { case $1 in lite) echo "bolt kokoro cosmos kai agent";; both) echo "bolt drama kokoro cosmos kai agent";;
+                        *) echo "bolt drama cosmos kai agent";; esac; }
+ALL=$(services "$VOICE_MODE")
+port() { case $1 in bolt) echo "$BOLT_PORT";; drama) echo "$DRAMA_PORT";; cosmos) echo "$COSMOS_PORT";; kai) echo "$KAI_PORT";;
+                    agent) echo "$AGENT_PORT";; kokoro) echo "$KOKORO_PORT";; esac; }
 check() { case $1 in
   kai)   curl -sf -m 2 -o /dev/null "127.0.0.1:$KAI_PORT/" ;;
   agent) curl -sf -m 2 -o /dev/null "127.0.0.1:$AGENT_PORT/health" ;;
@@ -346,7 +398,10 @@ launch() {
             exec env MODEL="$DRAMA_DIR" VOICES="$KGM_HOME/voices" VOICE=vesper PORT="$DRAMA_PORT" "$KB/scripts/serve-drama.sh" $(guard "$d") ;;
     cosmos) exec env MODEL="$COSMOS_DIR" PORT="$COSMOS_PORT" "$KB/scripts/serve-cosmos.sh" ;;
     kai)    cd "$KGM_HOME/eyes-of-kai" && exec node src/server.js ;;
-    agent)  cd "$KGM_HOME/app" && exec "$KGM_HOME/venv/bin/python" -m voice_agent.server --profile "$KGM_HOME/profile.json" --port "$AGENT_PORT" ;;
+    kokoro) if [ "$PLATFORM" = mac ]; then b=mlx; else b=torch; fi
+            cd "$KGM_HOME/app" && exec "$KGM_HOME/kokoro-venv/bin/python" -m voice_agent.kokoro_server --backend "$b" --port "$KOKORO_PORT" ;;
+    agent)  cd "$KGM_HOME/app" && exec "$KGM_HOME/venv/bin/python" -m voice_agent.server --profile "$KGM_HOME/profile.json" \
+              --port "$AGENT_PORT" --voice "$VOICE_MODE" ;;
   esac > "$log" 2>&1 < /dev/null
 }
 # On a DGX Spark the GPU allocates from the same memory as the page cache, and CUDA cannot take memory the cache holds:
@@ -354,7 +409,7 @@ launch() {
 # our own model files (no root needed) gives that memory back.
 uncache() {
   [ "$PLATFORM" = spark ] || return 0
-  "$KGM_HOME/venv/bin/python" - "$BOLT_DIR" "$DRAMA_DIR" "$COSMOS_DIR" <<'PY' 2>/dev/null || true
+  "$KGM_HOME/venv/bin/python" - "$BOLT_DIR" "${DRAMA_DIR:-}" "$COSMOS_DIR" <<'PY' 2>/dev/null || true
 import os, sys
 for d in sys.argv[1:]:
     for root, _, files in os.walk(d):
@@ -369,7 +424,7 @@ start1() {
   local s=$1
   if [ -n "$(pidof_ "$s")" ]; then echo "  $s already running (pid $(pidof_ "$s"))"; return 0; fi
   if check "$s"; then echo "  $s: port $(port "$s") is already answering (another server?) - not starting a second one"; return 1; fi
-  case $s in bolt|drama|cosmos) uncache ;; esac
+  case $s in bolt|drama|cosmos|kokoro) uncache ;; esac
   ( launch "$s" ) & echo $! > "$KGM_HOME/run/$s.pid"
   printf '  %-7s starting on :%s ' "$s" "$(port "$s")"
   for _ in $(seq 900); do
@@ -392,6 +447,24 @@ url() {
   echo "         tailscale serve --bg --https=8443 http://127.0.0.1:$AGENT_PORT"
   echo "       then open https://<this-machine>.<your-tailnet>.ts.net:8443 in Safari or Chrome."
 }
+# kgm voice full|lite|both: switch the voice engine (the one it needs must be installed: install.sh --voice …)
+voice() {
+  local m=${1:-} f
+  case $m in full|lite|both) ;; *) echo "usage: kgm voice full|lite|both (now: $VOICE_MODE)"; return 2 ;; esac
+  if [ "$m" != full ] && [ ! -x "$KGM_HOME/kokoro-venv/bin/python" ]; then
+    echo "The lite voice is not installed yet: run the installer again with --voice $m"; return 1; fi
+  if [ "$m" != lite ] && [ ! -f "$KGM_HOME/voices/.kgm-ready" ]; then
+    echo "Drama 3 is not installed yet: run the installer again with --voice $m"; return 1; fi
+  for s in $(services "$VOICE_MODE"); do case " $(services "$m") " in *" $s "*) ;; *) stop1 "$s" ;; esac; done
+  f="$KGM_HOME/kgm.env"; grep -v '^VOICE_MODE=' "$f" > "$f.new"; echo "VOICE_MODE=$m" >> "$f.new"; mv "$f.new" "$f"
+  "$KGM_HOME/venv/bin/python" - "$KGM_HOME/profile.json" "$m" <<'PY'
+import json, sys
+p = json.load(open(sys.argv[1])); p["voice_engine"] = sys.argv[2]; json.dump(p, open(sys.argv[1], "w"), indent=2)
+PY
+  VOICE_MODE=$m; ALL=$(services "$m")
+  stop1 agent; for s in $ALL; do start1 "$s" || return 1; done
+  echo "Voice: $m"
+}
 cmd=${1:-status}; shift || true
 svcs=${*:-$ALL}
 case $cmd in
@@ -404,7 +477,8 @@ case $cmd in
              printf '  %-7s %-9s :%-5s %s\n' "$s" "$st" "$(port "$s")" "${p:+pid $p}"; done ;;
   logs)    s=${1:-agent}; tail -n 60 -f "$KGM_HOME/logs/$s.log" ;;
   url)     url ;;
-  *)       echo "usage: kgm start|stop|restart [bolt drama cosmos kai agent] | status | logs [service] | url"; exit 2 ;;
+  voice)   voice "$@" ;;
+  *)       echo "usage: kgm start|stop|restart [$ALL] | status | logs [service] | url | voice full|lite|both"; exit 2 ;;
 esac
 KGM
 chmod +x "$KGM_HOME/bin/kgm"
@@ -418,12 +492,15 @@ fi
 say "Installed"
 note "folder:   $KGM_HOME"
 note "models:   $BOLT_DIR"
-note "          $DRAMA_DIR"
+[ "$DRAMA" = 1 ] && note "          $DRAMA_DIR"
 note "          $COSMOS_DIR"
-note "ports:    Bolt $BOLT_PORT · Drama $DRAMA_PORT · Cosmos3 $COSMOS_PORT · Kai $KAI_PORT · page $AGENT_PORT"
-note "commands: kgm start | stop | status | logs [service] | url"
+case $VOICE_MODE in
+  lite) VP="Kokoro $KOKORO_PORT" ;; both) VP="Drama $DRAMA_PORT · Kokoro $KOKORO_PORT" ;; *) VP="Drama $DRAMA_PORT" ;; esac
+note "voice:    $VOICE_MODE"
+note "ports:    Bolt $BOLT_PORT · $VP · Cosmos3 $COSMOS_PORT · Kai $KAI_PORT · page $AGENT_PORT"
+note "commands: kgm start | stop | status | logs [service] | url | voice full|lite|both"
 if [ "${KGM_START:-1}" = 1 ]; then
-  say "Starting Boo (the first start loads about 50 GB of models; give it a few minutes)"
+  say "Starting Boo (the first start loads up to 50 GB of models; give it a few minutes)"
   "$KGM_HOME/bin/kgm" start
 else
   echo; "$KGM_HOME/bin/kgm" url

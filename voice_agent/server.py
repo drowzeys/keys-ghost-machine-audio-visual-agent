@@ -85,6 +85,9 @@ def log(event) -> None:
 
     if isinstance(event, dict) and event.get("type") in LOGGED and not (event["type"] == "task" and event.get("state") == "step"):
         print(time.strftime("%H:%M:%S"), json.dumps({k: (v[:200] if isinstance(v, str) else v) for k, v in event.items()}), flush=True)
+
+
+ENGINE_LABELS = {"full": "Full (Drama 3)", "lite": "Lite (Kokoro)"}
 MOODS = {"neutral", "happy", "excited", "curious", "thinking", "surprised", "concerned", "sad", "playful"}
 
 
@@ -93,7 +96,12 @@ class Engines:
         self.profile = profile
         self.asr = Recognizer(profile["asr"])
         self.brain = Brain(profile["brain"])
-        self.voice = Voice(profile["voice"])
+        # the voice engine: Drama 3 ("full") by default; a profile can name Kokoro-82M there instead, or add it as
+        # voice_lite, and then the page offers Full and Lite and each conversation picks one
+        self.voices = {"full": Voice(profile["voice"])}
+        if profile.get("voice_lite"):
+            self.voices["lite"] = Voice(profile["voice_lite"])
+        self.voice = self.voices["full"]
         # a brain that can see (Bolt with its vision tower, on CUDA): turns about the camera go to it with the picture
         self.eyes = Brain({**profile["brain"], **profile["eyes"]}) if profile.get("eyes") else None
         # Eyes of Kai: captions every camera frame into a timestamped log the brain can look back through
@@ -103,7 +111,7 @@ class Engines:
         self.agents = backstage.load(profile)
         # live facts (president, weather, news) looked up here and answered by the front brain
         self.lookup = httpx.AsyncClient(timeout=httpx.Timeout(5, connect=2)) if profile.get("lookup", True) else None
-        self.voice_ids: set[str] = set()  # the voice engine's named voices, read when a page connects
+        self.voice_ids: dict[str, set[str]] = {}  # each voice engine's named voices, read when a page connects
         self.vad_path = profile.get("vad", {}).get("model", str(HERE.parent / "silero_vad.onnx"))
         self.asr_pool = ThreadPoolExecutor(1, thread_name_prefix="asr")  # one recognizer, one thread (MLX, CUDA)
 
@@ -142,8 +150,13 @@ class Conversation:
         self.agent = engines.profile.get("agent") or next(iter(engines.agents), None)
         self.tasks: set[asyncio.Task] = set()  # back agents at work after their turn ended
         self.asking: dict | None = None  # a back agent's tool waiting for the person's "yes, go ahead"
+        self.engine = "full"  # which voice engine speaks (the page can switch to "lite" when the profile has both)
         self.voice_name = engines.profile["voice"].get("voice")  # the page can pick another
         self.name = engines.profile.get("assistant_name", "Boo")  # what the assistant is called; the page can rename it
+
+    @property
+    def voice(self) -> Voice:
+        return self.e.voices[self.engine]
 
     async def send(self, event: dict | bytes) -> None:
         if isinstance(event, dict) and event.get("type") in ("task", "confirm"):
@@ -244,15 +257,18 @@ class Conversation:
                 except asyncio.TimeoutError:
                     pass
 
+        speaker, name = self.voice, self.voice_name
+
         async def voice():
             while not stop.is_set():
                 try:
-                    async for _ in self.e.voice.stream("Mm.", self.voice_name):
+                    async for _ in speaker.stream("Mm.", name):
                         pass
                 except Exception:
                     return
 
-        for job, on in ((brain, warm.get("brain")), (voice, warm.get("voice"))):
+        # an engine that answers at once (Kokoro: "Mm." in ~20 ms) needs no warming and would only spin
+        for job, on in ((brain, warm.get("brain")), (voice, warm.get("voice") and speaker.keep_warm)):
             if on:
                 asyncio.create_task(job())
 
@@ -351,6 +367,7 @@ class Conversation:
 
         spoken: list[str] = []
         self.heard = {"yes": True}
+        speaker = self.voice  # a switch of engine mid-reply applies to the next reply (one sample rate per reply)
         try:
             await self.emit({"type": "emotion", "emotion": mood})
             started = False
@@ -358,10 +375,10 @@ class Conversation:
                 yield text
             async for sentence in sentences(pieces(), **self.e.profile["voice"].get("chunks", {})):
                 await self.emit({"type": "reply", "text": sentence, "source": source})
-                async for pcm in self.e.voice.stream(sentence, self.voice_name):
+                async for pcm in speaker.stream(sentence, self.voice_name):
                     if not started:
                         started = True
-                        await self.emit({"type": "audio_start", "sample_rate": self.e.voice.sample_rate})
+                        await self.emit({"type": "audio_start", "sample_rate": speaker.sample_rate})
                     await self.emit(pcm)
                 spoken.append(sentence)
             await self.emit({"type": "audio_end"})
@@ -372,6 +389,7 @@ class Conversation:
 
     async def turn(self, audio: np.ndarray | None, text: str | None) -> None:
         clock = Clock()
+        speaker = self.voice  # a switch of engine mid-reply applies to the next reply (one sample rate per reply)
         spoken: list[str] = []
         asked = False
         tag = [""]  # the mood tag, kept in the history so the brain keeps tagging
@@ -543,11 +561,11 @@ class Conversation:
             async for sentence in sentences(pieces(), **self.e.profile["voice"].get("chunks", {})):
                 clock.mark("first_sentence_ms")
                 await self.emit({"type": "reply", "text": sentence})
-                async for pcm in self.e.voice.stream(sentence, self.voice_name):
+                async for pcm in speaker.stream(sentence, self.voice_name):
                     if not started:
                         started = True
                         clock.mark("first_audio_ms")
-                        await self.emit({"type": "audio_start", "sample_rate": self.e.voice.sample_rate})
+                        await self.emit({"type": "audio_start", "sample_rate": speaker.sample_rate})
                     await self.emit(pcm)
                 spoken.append(sentence)
             clock.mark("done_ms")
@@ -578,14 +596,18 @@ def build(profile: dict) -> FastAPI:
 
     @app.get("/voices/{name}.wav")
     def voice_sample(name: str):
-        folder = profile["voice"].get("samples")
-        path = Path(folder).expanduser() / f"{name}.wav" if folder and re.fullmatch(r"[\w-]+", name) else None
-        return FileResponse(path) if path and path.is_file() else JSONResponse({"error": "no sample"}, status_code=404)
+        for spec in (profile["voice"], profile.get("voice_lite") or {}):
+            folder = spec.get("samples")
+            path = Path(folder).expanduser() / f"{name}.wav" if folder and re.fullmatch(r"[\w-]+", name) else None
+            if path and path.is_file():
+                return FileResponse(path)
+        return JSONResponse({"error": "no sample"}, status_code=404)
 
     @app.get("/health")
     def health():
         return JSONResponse({"ok": True, "profile": profile.get("name"), "asr": profile["asr"]["model"],
                              "brain": profile["brain"]["model"], "voice": profile["voice"]["model"],
+                             "voice_lite": (profile.get("voice_lite") or {}).get("model"),
                              "eyes": (profile.get("eyes") or {}).get("model")})
 
     @app.websocket("/ws")
@@ -593,12 +615,22 @@ def build(profile: dict) -> FastAPI:
         await socket.accept()
         talk = Conversation(socket, engines)
         await talk.send({"type": "ready", "input_rate": SAMPLE_RATE})
-        voices = await engines.voice.voices()
-        engines.voice_ids = {v["id"] for v in voices}
-        if talk.voice_name and talk.voice_name not in engines.voice_ids:  # not loaded on this engine (yet): its default
-            talk.voice_name = None
-        if voices:
-            await talk.send({"type": "voices", "current": talk.voice_name, "list": voices})
+
+        async def offer_voices() -> None:
+            """The voice picker's list, for the engine this conversation speaks with."""
+            voices = await talk.voice.voices()
+            engines.voice_ids[talk.engine] = {v["id"] for v in voices}
+            if talk.voice_name and talk.voice_name not in engines.voice_ids[talk.engine]:  # not on this engine: its default
+                talk.voice_name = None
+            if voices:
+                await talk.send({"type": "voices", "engine": talk.engine, "current": talk.voice_name, "list": voices})
+
+        await offer_voices()
+        if len(engines.voices) > 1:  # both engines configured: offer the switch, listing only the ones that answer
+            up = [name for name, v in engines.voices.items() if await v.voices()]
+            if len(up) > 1:
+                await talk.send({"type": "engines", "current": talk.engine,
+                                 "list": [{"id": n, "label": ENGINE_LABELS.get(n, n)} for n in up]})
         await talk.send({"type": "agents", "current": talk.agent,
                          "list": [{"id": a.name, "label": a.label, "kind": a.kind} for a in engines.agents.values()]})
         try:
@@ -618,7 +650,14 @@ def build(profile: dict) -> FastAPI:
                     elif event.get("type") == "confirm" and talk.asking and event.get("id") == talk.asking["id"]:
                         if not talk.asking["future"].done() and event.get("answer") in ("allow_once", "allow_session", "deny"):
                             talk.asking["future"].set_result(event["answer"])
-                    elif event.get("type") == "voice" and event.get("name") in engines.voice_ids:
+                    elif event.get("type") == "engine" and event.get("name") in engines.voices and event["name"] != talk.engine:
+                        talk.engine = event["name"]
+                        spec = engines.profile["voice_lite" if talk.engine == "lite" else "voice"]
+                        talk.voice_name = spec.get("voice")
+                        await offer_voices()
+                        if not event.get("quiet"):
+                            asyncio.create_task(talk.when_quiet(lambda: talk.say("Hi, this is how I sound now.", talk.name, "happy", "says")))
+                    elif event.get("type") == "voice" and event.get("name") in engines.voice_ids.get(talk.engine, ()):
                         changed = event["name"] != talk.voice_name
                         talk.voice_name = event["name"]
                         if changed and not event.get("quiet"):
@@ -656,13 +695,41 @@ def build(profile: dict) -> FastAPI:
     return app
 
 
+# the lite voice: Kokoro-82M behind voice_agent.kokoro_server on its default port; a profile's voice_lite overrides it
+KOKORO = {"url": "http://127.0.0.1:8197/v1", "model": "kokoro-82m", "sample_rate": 24000, "chunks": {"first_words": 5},
+          "voice": "bf_emma", "keep_warm": False}
+
+
+def choose_voice(profile: dict, engine: str | None) -> dict:
+    """Applies the voice switch: "full" speaks with the profile's voice (Drama 3), "lite" with Kokoro-82M instead,
+    "both" keeps Drama 3 and adds Kokoro, and the page offers Full and Lite. From --voice, else the profile's
+    voice_engine, else full (or both when the profile already has a voice_lite)."""
+
+    engine = engine or profile.get("voice_engine") or ("both" if profile.get("voice_lite") else "full")
+    if engine not in ("full", "lite", "both"):
+        raise SystemExit(f"voice engine must be full, lite or both, not {engine!r}")
+    lite = {**KOKORO, **(profile.get("voice_lite") or {})}
+    profile = dict(profile)
+    if engine == "full":
+        profile.pop("voice_lite", None)
+    elif engine == "lite":
+        profile["voice"] = lite
+        profile.pop("voice_lite", None)
+    else:
+        profile["voice_lite"] = lite
+    profile["voice_engine"] = engine
+    return profile
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--profile", required=True)
     parser.add_argument("--host", default=os.environ.get("VOICE_HOST", "127.0.0.1"))
     parser.add_argument("--port", type=int, default=int(os.environ.get("VOICE_PORT", "8095")))
+    parser.add_argument("--voice", choices=["full", "lite", "both"], default=os.environ.get("VOICE_ENGINE") or None,
+                        help="full: Drama 3 (default); lite: Kokoro-82M; both: Drama 3 with a Full/Lite switch in the page")
     args = parser.parse_args()
-    profile = json.loads(Path(args.profile).read_text())
+    profile = choose_voice(json.loads(Path(args.profile).read_text()), args.voice)
     uvicorn.run(build(profile), host=args.host, port=args.port, log_level="warning", ws_max_size=2**24)
 
 

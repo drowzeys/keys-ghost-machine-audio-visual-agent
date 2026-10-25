@@ -24,6 +24,23 @@ below keeps its own licence.
   [plotarmordev's NVFP4 Drama fork](https://github.com/plotarmordev/TensorFold) (branch `drama-nvfp4`) with our
   voice-prefix cache. The Docker image is built on NVIDIA's PyTorch container (`nvcr.io/nvidia/pytorch:26.07-py3`).
 
+## Lite voice (optional)
+
+`voice_agent/kokoro_server.py` puts Kokoro-82M behind the same API as Drama 3, for `--voice lite` or `both`.
+
+- **Kokoro-82M** by [hexgrad](https://huggingface.co/hexgrad/Kokoro-82M) (Apache-2.0): the lite voice and its stock
+  voices (bf_emma by default). Built on the **StyleTTS 2** architecture by
+  [Yinghao Aaron Li et al.](https://github.com/yl4579/StyleTTS2) (MIT), with an iSTFTNet decoder.
+- **kokoro**, the PyTorch package by [hexgrad](https://github.com/hexgrad/kokoro) (Apache-2.0): runs it on the DGX Spark
+  (CUDA).
+- **mlx-audio** by Prince Canuma ([Blaizzy/mlx-audio](https://github.com/Blaizzy/mlx-audio), MIT): runs it on the Mac
+  (MLX), with the `mlx-community/Kokoro-82M-bf16` weights.
+- **misaki** by [hexgrad](https://github.com/hexgrad/misaki) (Apache-2.0): Kokoro's text-to-phoneme step, with
+  **spaCy** and its **en_core_web_sm** model by [Explosion](https://github.com/explosion/spaCy) (MIT), and
+  **espeak-ng** ([espeak-ng](https://github.com/espeak-ng/espeak-ng), GPL-3.0, through phonemizer-fork and
+  espeakng-loader) as the fallback for words its dictionary lacks. These are installed into the lite voice's own
+  environment, not shipped here.
+
 ## Eyes and memory
 
 - **Cosmos3-Edge** by [NVIDIA](https://huggingface.co/nvidia/Cosmos3-Edge) (OpenMDW 1.1): its reasoner tower (the

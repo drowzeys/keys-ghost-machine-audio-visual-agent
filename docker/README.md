@@ -2,21 +2,25 @@
 
 `ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent` runs the whole Spark stack in one container: Nemotron 3.5 Bolt
 on stock TensorFold 1.1.4, Drama 3 NVFP4 with the 14 voices and Cosmos3-Edge on the keys TensorFold builds, Parakeet v3
-(NeMo), the agent and page, and optionally Eyes of Kai. Model weights are not in the image; mount them.
+(NeMo), the agent and page, and optionally Eyes of Kai and the lite voice (Kokoro-82M, `VOICE_ENGINE=lite` or `both`).
+Model weights are not in the image; mount them.
+
+`VOICE_ENGINE` needs an image built from this commit or later (see *Build it yourself*); the published 0.1.0 image has
+the full voice (Drama 3) only.
 
 ## Requirements
 
 One NVIDIA DGX Spark (GB10, linux/arm64) with Docker and the NVIDIA Container Toolkit (`--gpus all`), about 64 GB of
-free memory (see the main README) and the weights below.
+free memory, or about 48 GB with the lite voice (see the main README), and the weights below.
 
 ## Mounts
 
 | Path in the container | What | Where to get it |
 |---|---|---|
 | `/models/bolt` | Nemotron 3.5 Bolt 74B-A9B, TensorFold 24 GB layout | `nvidia/NVIDIA-Nemotron-3.5-Bolt-74B-A9B` |
-| `/models/drama` | Drama 3 NVFP4 pruned | `plotarmordev/drama-3-NVFP4-Pruned` (Fish Audio licence) |
+| `/models/drama` | Drama 3 NVFP4 pruned (not needed with `VOICE_ENGINE=lite`) | `plotarmordev/drama-3-NVFP4-Pruned` (Fish Audio licence) |
 | `/models/cosmos3` | Cosmos3-Edge, converted | `nvidia/Cosmos3-Edge` + `tools/cosmos3_edge_to_mlx.py` from the release archive |
-| `/models/hf-cache` | Hugging Face cache; Parakeet v3 downloads here on first start | — |
+| `/models/hf-cache` | Hugging Face cache; Parakeet v3 (and Kokoro-82M for the lite voice) download here on first start | — |
 
 A model folder that is not mounted is skipped. Point at a server elsewhere instead with `BOLT_URL`, `DRAMA_URL` or
 `COSMOS_URL` (OpenAI-compatible base URLs ending in `/v1`).
@@ -37,7 +41,9 @@ put HTTPS in front of it (for example Tailscale Serve) as the main README descri
 |---|---|---|
 | `BOO_PORT` | 8095 | the page and API |
 | `BOLT_PORT`, `DRAMA_PORT`, `COSMOS_PORT` | 8091, 8093, 8099 | the model servers inside the container |
-| `VOICE` | vesper | default voice |
+| `VOICE` | vesper | default Drama 3 voice |
+| `VOICE_ENGINE` | full | `full` (Drama 3), `lite` (Kokoro-82M instead) or `both` (a Full/Lite switch in the page) |
+| `KOKORO_VOICE`, `KOKORO_PORT` | bf_emma, 8197 | the lite voice's default voice and port; `KOKORO_URL` points at one elsewhere |
 | `KAI` | 0 | 1 starts Eyes of Kai for camera memory (kept 2 days; the page can change it) |
 | `HERMES_CMD` | — | a Hermes ACP command for the back agent, e.g. `ssh host hermes acp` |
 | `DEEP_URL`, `DEEP_MODEL` | — | an OpenAI-compatible model to hand deep questions to instead |
@@ -50,4 +56,12 @@ previews from the Hugging Face repo).
 
 ```sh
 docker build -f docker/Dockerfile -t keys-ghost-machine .
+```
+
+Lite voice only, without Drama 3:
+
+```sh
+docker run --gpus all --rm -p 8095:8095 -e VOICE_ENGINE=lite \
+  -v ~/models/bolt:/models/bolt -v ~/models/cosmos3:/models/cosmos3 -v ~/models/hf-cache:/models/hf-cache \
+  keys-ghost-machine
 ```

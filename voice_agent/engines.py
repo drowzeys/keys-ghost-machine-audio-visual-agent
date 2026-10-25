@@ -207,6 +207,8 @@ class Voice:
         self.model = spec["model"]
         self.sample_rate = int(spec.get("sample_rate", 44_100))
         self.samples = spec.get("samples")  # the voices' files and .wav samples
+        # warm it while the person speaks (Drama 3 is slow to start when idle); Kokoro answers at once and sets false
+        self.keep_warm = bool(spec.get("keep_warm", True))
         self.client = httpx.AsyncClient(timeout=httpx.Timeout(120, connect=5))
 
     async def voices(self) -> list[dict]:
