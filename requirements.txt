@@ -1,6 +1,6 @@
 # the agent (both platforms); versions are the ones it was tested with
 fastapi>=0.162
-uvicorn>=0.54
+uvicorn[standard]>=0.54
 websockets>=17.3
 httpx>=0.28
 numpy>=2.4

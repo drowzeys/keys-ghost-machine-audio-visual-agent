@@ -38,6 +38,70 @@ Two reference platforms, measured on the live stacks:
   Safari on an iPhone works over HTTPS (for example through Tailscale Serve).
 - **Optional:** the Hermes back agent and a deep model; any ACP agent or OpenAI-compatible model can take their place.
 
+## One-shot install
+
+One command on a DGX Spark or an Apple silicon Mac. It checks the machine against the requirements above, then installs
+everything under `~/keys-ghost-machine`: the agent, the TensorFold 1.1.4 builds (checksums verified), a Python
+environment, Eyes of Kai with its patch, the 14 voices and the models (Bolt, Drama 3 NVFP4, and Cosmos3-Edge converted
+to TensorFold's 8-bit format), then starts Boo. No sudo. Run it again to resume or update; finished parts are skipped.
+
+**DGX Spark** (Linux, GB10, CUDA 13):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/drowzeys/keys-ghost-machine-audio-visual-agent/main/install.sh | bash
+```
+
+**Mac** (Apple silicon, macOS 26+; install [Homebrew](https://brew.sh) first if you don't have Node 22):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/drowzeys/keys-ghost-machine-audio-visual-agent/main/install.sh | bash
+```
+
+The same script detects the platform. The first run downloads about 55 GB (Bolt 24 GB, Drama 3 22 GB, Cosmos3-Edge
+7.2 GB to convert, then deleted) and takes a while; Parakeet v3 downloads itself the first time the agent starts.
+
+| Setting | What it does | Default |
+|---|---|---|
+| `KGM_HOME` | Install folder | `~/keys-ghost-machine` |
+| `KGM_MODELS` | Model folder | `$KGM_HOME/models` |
+| `KGM_BOLT_DIR`, `KGM_DRAMA_DIR`, `KGM_COSMOS_DIR` | Use model folders you already have (Cosmos3: an already converted one) | in `KGM_MODELS` |
+| `KGM_PORT_BASE` | Move all ports: base+1 Bolt, +8 (Mac) or +3 (Spark) Drama, +9 Cosmos3, +5 page, +70 Kai | 8091, 8098/8093, 8099, 8095, 3870 |
+| `KGM_START=0` | Install without starting | starts |
+| `KGM_KEEP_SRC=1` | Keep the original Cosmos3-Edge download after converting | deleted |
+| `KGM_FORCE=1` | Install even if the memory or disk check fails | refuses |
+| `HF_TOKEN` | Hugging Face token, if you have one | not needed |
+
+Settings go in front of `bash`, for example `curl -fsSL …/install.sh | KGM_HOME=/data/boo bash`.
+
+**Run it** with `kgm` (linked into `~/.local/bin` when that folder exists, otherwise `~/keys-ghost-machine/bin/kgm`):
+
+| Command | Does |
+|---|---|
+| `kgm start` | Starts Bolt, Drama 3, Cosmos3-Edge, Eyes of Kai and the agent, waiting for each to answer |
+| `kgm stop` | Stops them |
+| `kgm restart [service]` | Restarts everything, or one of `bolt drama cosmos kai agent` |
+| `kgm status` | Shows which parts are up, on which ports |
+| `kgm logs [service]` | Follows a log (the agent's by default) |
+| `kgm url` | Prints the page address and the Tailscale line for your phone |
+
+Then open `http://127.0.0.1:8095/`. For your phone, put both on [Tailscale](https://tailscale.com) and run once
+`tailscale serve --bg --https=8443 http://127.0.0.1:8095`; open `https://<this-machine>.<your-tailnet>.ts.net:8443`.
+If `hermes` is on your PATH the installer wires it in as the back agent; otherwise `~/keys-ghost-machine/agents.example.json`
+shows what to add to `~/keys-ghost-machine/profile.json`.
+
+**Docker instead (DGX Spark):** after the installer has fetched the models (`KGM_START=0`), or with your own copies:
+
+```sh
+docker run --gpus all --rm -p 8095:8095 \
+  -v ~/keys-ghost-machine/models/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB:/models/bolt \
+  -v ~/keys-ghost-machine/models/drama-3-NVFP4-Pruned:/models/drama \
+  -v ~/keys-ghost-machine/models/cosmos3-tf:/models/cosmos3 -e KAI=1 \
+  ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:0.1.0
+```
+
+**Uninstall:** `kgm stop && rm -rf ~/keys-ghost-machine ~/.local/bin/kgm` (add `~/.cache/huggingface` if nothing else
+uses its downloads).
+
 ## See it work
 
 [![Watch the promo: Boo answering live facts, reading a desk through the camera, handing a task to Hermes and being renamed](docs/media/promo-poster.jpg)](https://github.com/drowzeys/keys-ghost-machine-audio-visual-agent/blob/main/docs/media/promo-landscape.mp4)
@@ -160,7 +224,9 @@ docker run --gpus all --rm -p 8095:8095 \
 
 Mounts and settings are in [docker/README.md](docker/README.md).
 
-## Setup
+## Manual setup
+
+What the one-shot installer does, by hand:
 
 1. **Engines (TensorFold).** Serve, each on its own port:
    - Nemotron 3.5 Bolt with the TensorFold 1.1.4 release (`tensorfold serve … --no-thinking --context 32768`), on
