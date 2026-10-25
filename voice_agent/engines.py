@@ -45,6 +45,28 @@ class Vad:
 
 # ---------- speech recognition ----------
 
+def _guard_nemo_nvrtc_log() -> None:
+    """NeMo compiles its CUDA-graph decoder kernel with NVRTC and reads the compile log into b" " * size. An empty log is
+    one byte, and b" " * 1 is Python's shared b" " object, so NVRTC writes a NUL into it: from then on every b" " in the
+    process is b"\\x00" (HTTP status lines, websockets' request parser, and any .pyc written afterwards). Give NVRTC a
+    buffer of its own for such a log; the log is not read."""
+    try:
+        from cuda.bindings import nvrtc
+    except ImportError:
+        return
+    get_log = nvrtc.nvrtcGetProgramLog
+    if getattr(get_log, "_own_buffer", False):
+        return
+
+    def own_buffer(prog, log):
+        if isinstance(log, bytes) and len(log) <= 1:
+            log = bytes(len(log))  # a new object, never a shared one
+        return get_log(prog, log)
+
+    own_buffer._own_buffer = True
+    nvrtc.nvrtcGetProgramLog = own_buffer
+
+
 class Recognizer:
     """Text of one utterance (float32 mono at 16 kHz)."""
 
@@ -63,6 +85,7 @@ class Recognizer:
         elif self.kind == "nemo":
             import nemo.collections.asr as nemo_asr
 
+            _guard_nemo_nvrtc_log()
             self.model = nemo_asr.models.ASRModel.from_pretrained(self.model_id).eval().cuda()
         else:
             raise ValueError(f"unknown recognizer kind {self.kind}")
