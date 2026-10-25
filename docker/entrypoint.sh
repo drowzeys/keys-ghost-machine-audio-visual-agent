@@ -34,8 +34,8 @@ if [ -d /models/bolt ]; then
   start bolt "$BOLT_PORT" "$TF" serve /models/bolt --name nvidia-nemotron-3.5-bolt --host 127.0.0.1 --port "$BOLT_PORT" \
     --no-thinking --context "${BOLT_CONTEXT:-32768}" --parallel 2 --no-update-check
 fi
-# Drama 3's silence guard (TensorFold 1.1.4) when the build has it; the CUDA NVFP4 engine does not yet, and Boo's own
-# check then drops a stalled take's quiet tail and asks for the rest
+# Drama 3's silence guard (TensorFold 1.1.4) when the build has it (the CUDA NVFP4 engine since v0.2.0); Boo's own
+# check also drops a stalled take's quiet tail and asks for the rest
 GUARD="--silence-floor-dbfs=-30 --silence-seconds=4 --silence-mid-s=2 --silence-mid-min-voiced-s=1 --silence-redraws=3 --silence-redraw-budget-s=90"
 guard() { case "$("$1" serve --help 2>&1 || true)" in *--silence-mid-min-voiced-s*) echo "$GUARD" ;; esac; }
 if [ -d /models/drama ] && [ "$VOICE_ENGINE" != lite ]; then

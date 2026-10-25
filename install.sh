@@ -25,7 +25,7 @@
 set -euo pipefail
 
 REPO=drowzeys/keys-ghost-machine-audio-visual-agent
-RELEASE=${KGM_RELEASE:-v0.1.0}
+RELEASE=${KGM_RELEASE:-v0.2.0}
 TF_VERSION=1.1.4
 KAI_COMMIT=7f2f02b
 KGM_HOME=${KGM_HOME:-$HOME/keys-ghost-machine}
@@ -193,12 +193,17 @@ note "installed $(basename "$APP")/requirements-$PLATFORM.txt"
 say "TensorFold $TF_VERSION builds"
 ENG=$KGM_HOME/engines; mkdir -p "$ENG/dl"
 if [ "$PLATFORM" = mac ]; then KB=keys-boo-tensorfold-$TF_VERSION-macos-arm64; else KB=keys-boo-tensorfold-$TF_VERSION-linux-aarch64; fi
+if [ -d "$ENG/$KB" ] && [ "$(cat "$ENG/$KB/.kgm-release" 2>/dev/null || echo v0.1.0)" != "$RELEASE" ]; then
+  note "replacing the keys build with the one from $RELEASE"   # an update: a release can ship a newer build
+  rm -rf "$ENG/$KB" "$ENG/dl/$KB.tar.gz" "$ENG/dl/$KB.tar.gz.sha256"
+fi
 if [ ! -d "$ENG/$KB" ]; then
   base="https://github.com/$REPO/releases/download/$RELEASE"
   fetch "$base/$KB.tar.gz.sha256" "$ENG/dl/$KB.tar.gz.sha256"
   fetch "$base/$KB.tar.gz" "$ENG/dl/$KB.tar.gz"
   verify "$ENG/dl/$KB.tar.gz" "$ENG/dl/$KB.tar.gz.sha256"
   LC_ALL=C tar xzf "$ENG/dl/$KB.tar.gz" -C "$ENG"
+  echo "$RELEASE" > "$ENG/$KB/.kgm-release"
   [ "$PLATFORM" = mac ] && xattr -dr com.apple.quarantine "$ENG/$KB" 2>/dev/null || true
 fi
 note "keys build: $ENG/$KB (unofficial community build of TensorFold, Apache-2.0)"
@@ -384,8 +389,8 @@ check() { case $1 in
   *)     curl -sf -m 2 -o /dev/null "127.0.0.1:$(port "$1")/v1/models" ;;
 esac; }
 # Drama 3 sometimes goes quiet after a sentence until the frame cap; TensorFold 1.1.4's silence guard redraws such a reply
-# and ends such a stream (Boo then asks for the rest). Only builds that list the flags get them: the CUDA NVFP4 engine
-# has no guard yet, and Boo's own check covers it.
+# and ends such a stream (Boo then asks for the rest). Only builds that list the flags get them (the Mac build, and the
+# CUDA NVFP4 engine since v0.2.0); Boo's own check covers any other.
 GUARD="--silence-floor-dbfs=-30 --silence-seconds=4 --silence-mid-s=2 --silence-mid-min-voiced-s=1 --silence-redraws=3 --silence-redraw-budget-s=90"
 guard() { case "$("$1" serve --help 2>&1)" in *--silence-mid-min-voiced-s*) echo "$GUARD" ;; esac; }
 pidof_() { local f="$KGM_HOME/run/$1.pid"; [ -f "$f" ] && kill -0 "$(cat "$f")" 2>/dev/null && cat "$f"; }

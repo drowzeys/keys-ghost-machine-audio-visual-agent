@@ -1,5 +1,75 @@
 # Keys Ghost Machine — audio/visual agent, powered by [TensorFold](https://github.com/ashhart/TensorFold)
 
+## What's new in v0.2.0
+
+**Kokoro Lite, a second voice for smaller machines.** [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M)
+(hexgrad, Apache-2.0) can now speak for Boo instead of Drama 3, or beside it with a switch in the page. It is for
+memory-constrained hardware: a DGX Spark that shares its memory with other work, or a Mac at the low end of the
+[requirements](#requirements). Everything else (Bolt, Cosmos3-Edge, Parakeet, Eyes of Kai, Hermes) stays the same.
+
+- **Install Lite, DGX Spark** (about 48 GB free memory):
+  `curl -fsSL https://raw.githubusercontent.com/drowzeys/keys-ghost-machine-audio-visual-agent/main/install.sh | bash -s -- --voice lite`
+- **Install Lite, Mac** (Apple silicon, macOS 26+; 96 GB comfortable, 64 GB tight): the same command,
+  `curl -fsSL https://raw.githubusercontent.com/drowzeys/keys-ghost-machine-audio-visual-agent/main/install.sh | bash -s -- --voice lite`
+- **Docker, Lite** (DGX Spark, no Drama 3 mount needed):
+  ```sh
+  docker run --gpus all --rm -p 8095:8095 -e VOICE_ENGINE=lite -e KAI=1 \
+    -v ~/keys-ghost-machine/models/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB:/models/bolt \
+    -v ~/keys-ghost-machine/models/cosmos3-tf:/models/cosmos3 -v ~/models/hf-cache:/models/hf-cache \
+    ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:0.2.0
+  ```
+- **Both, with a Full/Lite toggle:** install with `--voice both` (or `-e VOICE_ENGINE=both` in Docker, with the
+  Drama 3 mount) and the page shows a **Full / Lite** switch per conversation; the voice list follows the engine.
+  On an existing install, `kgm voice full|lite|both` switches. Pick a Kokoro voice in the page's Voice list
+  (`bf_emma` by default, `af_heart` is Kokoro's best rated) or set `KOKORO_VOICE=af_heart` in Docker.
+- **Trade-off:** on a DGX Spark Lite answers in about 0.33–0.40 s voice to voice (Full 0.55–0.77 s) and uses about
+  40 GB less memory. On a Mac it is about as fast as Full and saves about 9 GB. Lite speaks English only in Boo and
+  has no voice cloning, emotion control or the 14 Drama 3 voices.
+
+**Kokoro Lite vs Drama 3 (4-bit)**
+
+| | Kokoro Lite | Drama 3 4-bit (NVFP4) |
+|---|---|---|
+| Model | 82M parameters, ~330 MB | Billions of parameters, 4-bit NVFP4 |
+| Voice-engine memory: DGX Spark | ~3.5 GB | ~42 GB |
+| Voice-engine memory: Mac | ~0.8 GB | ~10 GB |
+| Voice starts: Spark | 33–40 ms | 112–121 ms |
+| Voice starts: Mac | 51–54 ms | ~60 ms |
+| Voice to voice: Spark | 0.33–0.40 s | 0.55–0.77 s |
+| Voice to voice: Mac | 0.49–0.64 s | 0.43–0.61 s |
+| Naturalness (UTMOS) | 4.35 (bf_emma) – 4.52 (af_heart) | 4.53 (Vesper) |
+| Voices | 54 built in | 14 custom, incl. Vesper |
+| Voice cloning | No | Yes |
+| Emotion/style control | No | Yes |
+| Long-line stalls | None | Occasional; fixed by the silence guard + resume in v0.2.0 |
+| Streaming | Whole sentence (<0.13 s) | Streams within a sentence |
+| Languages | EN, ES, FR, IT, PT, HI, JA, ZH | Wider, incl. German |
+| Licence | Apache-2.0 | Fish Audio Community License (hosted commercial use needs a Fish licence) |
+
+Spark: Lite is twice as fast and frees ~40 GB. Mac: same speed, so run `both` and keep Vesper with a Lite toggle.
+Choose Drama for a signature voice, cloning, emotion or German; choose Kokoro for small or shared hardware, an Apache
+licence or the lowest delay.
+
+**Fixes**
+
+- **Drama 3 long-line stalls:** a long reply that went quiet after its first sentence (on about 1 in 5 paragraph-length
+  lines) is now caught. The DGX Spark's Drama 3 build gains TensorFold 1.1.4's silence guard (new in the v0.2.0
+  Linux archive and the Docker image), the Mac build already had it, and Boo itself drops a stalled take's quiet tail
+  and asks for the unspoken rest.
+- **Never deaf after a fast short reply:** a quick reply such as "I'm on it." could leave Boo marked as still
+  speaking, and the session stopped listening. Fixed (64 of 64 turns heard in testing).
+- **Drama 3 "speech output capacity is full" (503):** the keep-warm loop no longer outlives its page or a stopped
+  microphone (it stops on disconnect, after 2 s without audio and after 60 s), warms with one "Mm." at a time and never
+  while anything is being said; a refused line is asked again for up to `retry_s` (6 s) instead of being lost; a
+  stopped turn frees its speech slot at once.
+- **Bolt repetition loops:** a reply that starts repeating a sentence it already said ends there, unsaid.
+- **Interrupted replies** stopped before their first word no longer leave "(interrupted)" in the history for the
+  brain to copy.
+- The reference Mac now runs `voice_engine: both`, with the Full/Lite toggle tested live.
+
+Builds: [v0.2.0 release](https://github.com/drowzeys/keys-ghost-machine-audio-visual-agent/releases/tag/v0.2.0) ·
+`docker pull ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:0.2.0`
+
 <a href="https://github.com/drowzeys/keys-ghost-machine-audio-visual-agent/blob/main/docs/media/promo-45s.mp4"><img src="docs/media/promo-45s-poster.jpg" width="300" alt="Play the 46-second demo: Boo answering a live fact, reading a desk through the camera, handing a task to Hermes and being renamed"></a>
 
 ▶ [Watch the 45-second demo](https://github.com/drowzeys/keys-ghost-machine-audio-visual-agent/blob/main/docs/media/promo-45s.mp4) (phone, 46 s, pauses trimmed)
@@ -102,14 +172,14 @@ curl -fsSL https://raw.githubusercontent.com/drowzeys/keys-ghost-machine-audio-v
 A 64 GB Mac also needs the GPU memory limit raised as described under [Requirements](#requirements); the installer
 says so.
 
-**Docker, Lite (DGX Spark):** no Drama 3 mount, `-e VOICE_ENGINE=lite` (needs an image built from this commit; see
-[docker/README.md](docker/README.md), the published 0.1.0 image has the full voice only):
+**Docker, Lite (DGX Spark):** no Drama 3 mount, `-e VOICE_ENGINE=lite` (image 0.2.0 or later; see
+[docker/README.md](docker/README.md)):
 
 ```sh
 docker run --gpus all --rm -p 8095:8095 -e VOICE_ENGINE=lite \
   -v ~/keys-ghost-machine/models/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB:/models/bolt \
   -v ~/keys-ghost-machine/models/cosmos3-tf:/models/cosmos3 -v ~/models/hf-cache:/models/hf-cache -e KAI=1 \
-  keys-ghost-machine
+  ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:0.2.0
 ```
 
 | Setting | What it does | Default |
@@ -150,11 +220,10 @@ docker run --gpus all --rm -p 8095:8095 \
   -v ~/keys-ghost-machine/models/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB:/models/bolt \
   -v ~/keys-ghost-machine/models/drama-3-NVFP4-Pruned:/models/drama \
   -v ~/keys-ghost-machine/models/cosmos3-tf:/models/cosmos3 -e KAI=1 \
-  ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:0.1.0
+  ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:0.2.0
 ```
 
-`-e VOICE_ENGINE=lite` (no Drama mount needed) or `both` picks the voice in an image built from this commit
-(see [docker/README.md](docker/README.md)); the published 0.1.0 image has the full voice only.
+`-e VOICE_ENGINE=lite` (no Drama mount needed) or `both` picks the voice (see [docker/README.md](docker/README.md)).
 
 **Uninstall:** `kgm stop && rm -rf ~/keys-ghost-machine ~/.local/bin/kgm` (add `~/.cache/huggingface` if nothing else
 uses its downloads).
@@ -170,7 +239,7 @@ Measured on the live stacks with the same 16 questions and the same client:
 
 | | DGX Spark, lite | DGX Spark, full | Mac, lite | Mac, full |
 |---|---|---|---|---|
-| Voice-to-voice, median | **0.33 s** | 0.55–0.77 s | 0.56–0.64 s | 0.47–0.60 s |
+| Voice-to-voice, median | **0.33–0.40 s** | 0.55–0.77 s | 0.49–0.64 s | 0.47–0.60 s |
 | Voice engine memory | **≈ 3.5 GB** | ≈ 42 GB | **≈ 0.7 GB** | ≈ 10 GB |
 | Whole stack in use | **≈ 62 GB** | ≈ 101 GB | **≈ 55 GB** | ≈ 64 GB |
 | Voice engine on disk | ≈ 0.4 GB | 21 GB | ≈ 0.4 GB | 21 GB |
@@ -292,10 +361,11 @@ short replies finish fastest; since the fix every turn was heard: 64 of 64 in te
 **Long lines that go quiet.** Drama 3 sometimes speaks the first sentence of a long line and then only silence or a
 flat hum near −36 dBFS until the frame cap, on about 1 in 5 paragraph-length inputs, and the same input every time
 (the seed comes from the prompt; [ashhart/TensorFold#1275](https://github.com/ashhart/TensorFold/issues/1275)). It is
-the model's sampling, not a TensorFold bug, and 1.1.3 does the same. On the Mac, `kgm` starts Drama 3 with 1.1.4's
+the model's sampling, not a TensorFold bug, and 1.1.3 does the same. `kgm` and the Docker image start Drama 3 with 1.1.4's
 silence guard: `--silence-floor-dbfs=-30 --silence-seconds=4 --silence-mid-s=2 --silence-mid-min-voiced-s=1
---silence-redraws=3 --silence-redraw-budget-s=90` (whole replies are redrawn; good takes stay byte-identical). The
-guard never redraws a stream, and the DGX Spark's NVFP4 engine has no guard yet, so Boo also checks each streamed
+--silence-redraws=3 --silence-redraw-budget-s=90` (whole replies are redrawn; good takes stay byte-identical; on the
+DGX Spark since v0.2.0, whose NVFP4 engine gained the guard's flags). The
+guard never redraws a stream, so Boo also checks each streamed
 take itself: after 3 s under −30 dBFS it drops the quiet tail and asks for the text after the last sentence spoken
 (a new text draws a new seed). On 12 paragraphs the stalled one came back whole in one extra request, and the other
 11 were byte-identical with the check on.
@@ -314,29 +384,33 @@ take itself: after 3 s under −30 dBFS it drops the quiet tail and asks for the
 
 ## Prebuilt builds
 
-The [v0.1.0 release](https://github.com/drowzeys/keys-ghost-machine-audio-visual-agent/releases/tag/v0.1.0) has
+The [v0.2.0 release](https://github.com/drowzeys/keys-ghost-machine-audio-visual-agent/releases/tag/v0.2.0) has
 unofficial community builds of TensorFold 1.1.4 with everything Boo needs that upstream does not ship yet:
 
 - `keys-boo-tensorfold-1.1.4-macos-arm64.tar.gz`: one `tensorfold-native` for Apple silicon that serves Nemotron 3.5
   Bolt (with `libbolt.dylib`), Drama 3 NVFP4 with named voices and the voice-prefix cache, and Cosmos3-Edge on Metal.
 - `keys-boo-tensorfold-1.1.4-linux-aarch64.tar.gz`: for a DGX Spark, `tensorfold-cosmos3` (Cosmos3-Edge on CUDA) and
-  `tensorfold-drama3-nvfp4` (Drama 3 NVFP4 with the voice-prefix cache). Bolt uses the stock
+  `tensorfold-drama3-nvfp4` (Drama 3 NVFP4 with the voice-prefix cache and, new in v0.2.0, 1.1.4's silence guard
+  flags). Bolt uses the stock
   [TensorFold 1.1.4](https://github.com/ashhart/TensorFold/releases/tag/v1.1.4) release.
 
 Each archive has its own README with run commands, a change list, the licences and `SHA256SUMS`. The source is
 [drowzeys/TensorFold](https://github.com/drowzeys/TensorFold), branches `bolt-metal-114`, `drama3-metal-voices-114`,
-`cosmos3-metal-114`, `cosmos3-cuda-114` and `drama3-cuda-voices`.
+`cosmos3-metal-114`, `cosmos3-cuda-114` and `drama3-cuda-voices-guard` (`drama3-cuda-voices` plus the guard).
 
 **Docker (DGX Spark):** the whole Spark stack in one image, without model weights
 (about 25 GB, built on NVIDIA's PyTorch container):
 
 ```sh
-docker pull ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:0.1.0
+docker pull ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:0.2.0
 docker run --gpus all --rm -p 8095:8095 \
   -v ~/models/bolt:/models/bolt -v ~/models/drama:/models/drama -v ~/models/cosmos3:/models/cosmos3 \
   -v ~/models/hf-cache:/models/hf-cache -e KAI=1 \
-  ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:0.1.0
+  ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:0.2.0
 ```
+
+Add `-e VOICE_ENGINE=lite` (and drop the Drama mount) for the lite voice, or `-e VOICE_ENGINE=both` for the Full/Lite
+switch.
 
 Mounts and settings are in [docker/README.md](docker/README.md).
 
@@ -411,7 +485,8 @@ A profile names each engine and the turn timing:
   [plotarmordev/TensorFold #1](https://github.com/plotarmordev/TensorFold/pull/1) (prompt rows) and
   [#2](https://github.com/plotarmordev/TensorFold/pull/2) (NVFP4 pruned experts), plus a voice prefix cache. The
   **DGX Spark** runs Drama 3 with [plotarmordev's TensorFold fork](https://github.com/plotarmordev/TensorFold) plus
-  the same voice-prefix cache; stock TensorFold 1.1.4 does not load the NVFP4 pruned checkpoint yet.
+  the same voice-prefix cache and 1.1.4's silence guard flags; stock TensorFold 1.1.4 does not load the NVFP4 pruned
+  checkpoint yet.
 - Free-form camera descriptions ("describe what you see") can still name a side wrongly; questions about a side go
   through the reliable path above.
 - Live facts come from web search snippets, which can be out of date; ask the back agent for anything that needs

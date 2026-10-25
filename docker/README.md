@@ -5,8 +5,8 @@ on stock TensorFold 1.1.4, Drama 3 NVFP4 with the 14 voices and Cosmos3-Edge on 
 (NeMo), the agent and page, and optionally Eyes of Kai and the lite voice (Kokoro-82M, `VOICE_ENGINE=lite` or `both`).
 Model weights are not in the image; mount them.
 
-`VOICE_ENGINE` needs an image built from this commit or later (see *Build it yourself*); the published 0.1.0 image has
-the full voice (Drama 3) only.
+`VOICE_ENGINE` needs image 0.2.0 or later (0.1.0 has the full voice, Drama 3, only). Since 0.2.0 the DGX Spark's
+Drama 3 engine also has TensorFold 1.1.4's silence guard, which the container turns on.
 
 ## Requirements
 
@@ -31,7 +31,16 @@ A model folder that is not mounted is skipped. Point at a server elsewhere inste
 docker run --gpus all --rm -p 8095:8095 \
   -v ~/models/bolt:/models/bolt -v ~/models/drama:/models/drama -v ~/models/cosmos3:/models/cosmos3 \
   -v ~/models/hf-cache:/models/hf-cache -e KAI=1 \
-  ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:0.1.0
+  ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:0.2.0
+```
+
+Lite voice only (Kokoro-82M, no Drama 3 mount), or both with a Full/Lite switch in the page:
+
+```sh
+docker run --gpus all --rm -p 8095:8095 -e VOICE_ENGINE=lite \
+  -v ~/models/bolt:/models/bolt -v ~/models/cosmos3:/models/cosmos3 -v ~/models/hf-cache:/models/hf-cache \
+  ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:0.2.0
+# both: add -v ~/models/drama:/models/drama and use -e VOICE_ENGINE=both
 ```
 
 Then open `http://<spark>:8095/`. Browsers allow the microphone and camera only over HTTPS or on localhost; from a phone,
