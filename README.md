@@ -30,13 +30,30 @@ Two reference platforms, measured on the live stacks:
 | Agent + Parakeet v3 | ≈ 3.1 GB (MLX) | ≈ 5.4 GB (NeMo) | ≈ 2.5 GB |
 | Eyes of Kai | < 0.1 GB | < 0.1 GB | small |
 | **Total** | **≈ 79 GB** | **≈ 61 GB** (+≈ 46 GB if weights are staged on /dev/shm for fast starts, optional) | **≈ 50 GB free** (≈ 57 GB while converting Cosmos) |
-| **Total, lite voice** | **≈ 52 GB** | **≈ 44 GB** | **≈ 31 GB free** (Mac), **≈ 36 GB** (Spark) |
+| **Total, lite voice** | **≈ 52 GB** | **≈ 44 GB** | **≈ 31 GB free** (Mac), **≈ 36 GB** (Spark); ≈ 9 GB more while converting Cosmos |
 
-- **Mac minimum:** 96 GB unified memory (an M-series Max or Ultra); 128 GB or more recommended. Tested on an M5 Ultra
-  with 256 GB. The lite voice does not lower this (Bolt sets the floor and a 64 GB Mac is too small either way), but it
-  leaves about 9 GB more room.
-- **DGX Spark minimum:** one DGX Spark (128 GB) with about 64 GB free, or **about 48 GB free with the lite voice**.
-  Everything fits on one node; the reference setup splits it over two.
+**Full or Lite.** The full voice is Drama 3; the [lite voice](#lite-voice-kokoro-82m) is Kokoro-82M. Everything else
+(Bolt, Cosmos3-Edge, Parakeet, Eyes of Kai) is the same in both.
+
+| | DGX Spark, Full | DGX Spark, Lite | Mac, Full | Mac, Lite |
+|---|---|---|---|---|
+| Platform | DGX Spark (GB10, 128 GB), Linux aarch64, CUDA 13 | same | Apple silicon, macOS 26+ | same |
+| Minimum memory | 64 GB free | **48 GB free** | 96 GB unified | **64 GB unified** (tight, see below) |
+| Recommended memory | a whole DGX Spark (≈ 101 GB in use with weights staged in memory) | a whole DGX Spark, with ≈ 40 GB left for other work | 128 GB or more | 96 GB or more |
+| Free disk | ≈ 50 GB (≈ 57 GB while converting Cosmos) | ≈ 36 GB (≈ 45 GB while converting) | ≈ 50 GB (≈ 57 GB while converting Cosmos) | ≈ 31 GB (≈ 40 GB while converting) |
+| Measured in use, whole stack | ≈ 101 GB | ≈ 62 GB | ≈ 64 GB | ≈ 55 GB |
+| Voice engine alone | Drama 3 ≈ 42 GB | Kokoro ≈ 3.5 GB | Drama 3 ≈ 10 GB | Kokoro ≈ 0.7 GB |
+
+- **Lite mainly saves memory on the DGX Spark** (about 39 GB of the stack in use). On a Mac it saves only about 9 GB:
+  the floor there is Bolt (≈ 45 GB) plus Cosmos3-Edge (≈ 3 GB) and Parakeet (≈ 3 GB), about 52–55 GB before macOS.
+- **A 64 GB Mac with Lite is tight and untested**: the stack needs about 55 GB, and macOS lets the GPU use only about
+  three quarters of memory (≈ 48 GB) unless you raise the limit, e.g. `sudo sysctl iogpu.wired_limit_mb=57344`, which
+  leaves macOS about 8 GB. Close other apps. 96 GB is the comfortable Mac minimum for Lite; Full needs 96 GB. Tested on
+  an M5 Ultra with 256 GB.
+- The DGX Spark figures are for everything on one node; the reference setup splits it over two. A lighter setup without
+  the camera model or Eyes of Kai is not offered by the installer and was not measured.
+- **What Lite gives up:** the 14 custom Drama 3 voices, voice cloning, Drama 3's expressiveness, and languages: Boo's
+  lite voice speaks English only, so no German and none of the other European languages Drama 3 covers.
 - **Software:** TensorFold 1.1.4 (release binaries for Bolt; the Drama 3 and Cosmos3 builds are described under
   Limitations), Python 3.11 or later, Node 22 or later for Eyes of Kai, and a browser with a microphone and camera.
   Safari on an iPhone works over HTTPS (for example through Tailscale Serve).
@@ -64,11 +81,35 @@ curl -fsSL https://raw.githubusercontent.com/drowzeys/keys-ghost-machine-audio-v
 The same script detects the platform. The first run downloads about 55 GB (Bolt 24 GB, Drama 3 22 GB, Cosmos3-Edge
 7.2 GB to convert, then deleted) and takes a while; Parakeet v3 downloads itself the first time the agent starts.
 
-**Lite voice** ([what it is](#lite-voice-kokoro-82m)): add `--voice lite` to skip Drama 3 (about 22 GB less to download)
-and speak with Kokoro-82M, or `--voice both` to install both and get a Full/Lite switch in the page:
+### One-shot install, Lite (memory-constrained hardware)
+
+The same installer with `--voice lite`: Kokoro-82M instead of Drama 3 (no Drama 3 download, about 22 GB less), for a
+DGX Spark that shares its memory with other work or a Mac at the low end of the [requirements](#requirements).
+
+**DGX Spark, Lite** (Linux, GB10, CUDA 13; about 48 GB free memory):
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/drowzeys/keys-ghost-machine-audio-visual-agent/main/install.sh | bash -s -- --voice lite
+```
+
+**Mac, Lite** (Apple silicon, macOS 26+; 96 GB unified memory comfortable, 64 GB tight):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/drowzeys/keys-ghost-machine-audio-visual-agent/main/install.sh | bash -s -- --voice lite
+```
+
+`--voice both` installs both voices and adds a Full/Lite switch to the page; `kgm voice full|lite|both` switches later.
+A 64 GB Mac also needs the GPU memory limit raised as described under [Requirements](#requirements); the installer
+says so.
+
+**Docker, Lite (DGX Spark):** no Drama 3 mount, `-e VOICE_ENGINE=lite` (needs an image built from this commit; see
+[docker/README.md](docker/README.md), the published 0.1.0 image has the full voice only):
+
+```sh
+docker run --gpus all --rm -p 8095:8095 -e VOICE_ENGINE=lite \
+  -v ~/keys-ghost-machine/models/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB:/models/bolt \
+  -v ~/keys-ghost-machine/models/cosmos3-tf:/models/cosmos3 -v ~/models/hf-cache:/models/hf-cache -e KAI=1 \
+  keys-ghost-machine
 ```
 
 | Setting | What it does | Default |

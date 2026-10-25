@@ -80,8 +80,13 @@ case $PLATFORM in
     MACOS=$(sw_vers -productVersion 2>/dev/null || echo 0)
     [ "${MACOS%%.*}" -ge 26 ] 2>/dev/null || [ -n "${KGM_FORCE:-}" ] || die "macOS 26 or later is needed for Metal 4 (this is $MACOS)."
     MEM_GB=${KGM_MEM_GB:-$(( $(sysctl -n hw.memsize) / 1073741824 ))}
-    MEM_NEED=96; MEM_WHAT="unified memory"   # lite too: Bolt sets the floor (lite frees ≈ 9 GB)
+    MEM_NEED=96; MEM_WHAT="unified memory"
+    [ "$VOICE_MODE" = lite ] && MEM_NEED=64   # Bolt + Cosmos3 + Parakeet + Kokoro ≈ 55 GB in use: tight on 64 GB
     note "Apple silicon Mac, macOS $MACOS, $MEM_GB GB unified memory"
+    if [ "$VOICE_MODE" = lite ] && [ "$MEM_GB" -lt 96 ]; then
+      note "warning: on under 96 GB, raise the GPU memory limit before starting (≈ 55 GB needed; macOS allows about 3/4):"
+      note "         sudo sysctl iogpu.wired_limit_mb=$(( MEM_GB * 1024 - 8192 ))   and close other apps"
+    fi
     ;;
   spark)
     GPU=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 || true)
