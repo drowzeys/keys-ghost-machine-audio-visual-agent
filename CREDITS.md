@@ -41,8 +41,10 @@ below keeps its own licence.
 ## Back agents and live facts
 
 - **Hermes Agent** by [Nous Research](https://github.com/NousResearch/hermes-agent) over ACP (Agent Client Protocol),
-  following Eyes of Kai's Hermes client and the frontstage/backstage design of
-  [qwen-audio-agent](https://github.com/QwenAudio/qwen-audio-agent).
+  following Eyes of Kai's Hermes client.
+- **qwen-audio-agent** by the [Qwen Audio team](https://github.com/QwenAudio/qwen-audio-agent) (Apache-2.0): design
+  inspiration, the frontstage/backstage split (a fast voice in front, a tool-using agent behind that reports back); no
+  code from it is used.
 - **RED-SNOW 5.3 Flash** (a GLM-5.3-Flash build), the back agent's model in the reference setup; any OpenAI-compatible
   model works.
 - **ddgs** (Dux Distributed Global Search, MIT) by deedy5: the web search behind quick live facts.

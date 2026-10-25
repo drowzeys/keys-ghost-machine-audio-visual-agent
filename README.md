@@ -1,4 +1,4 @@
-# keys-ghost-machine (audio/visual agent)
+# Keys Ghost Machine — audio/visual agent, powered by [TensorFold](https://github.com/ashhart/TensorFold)
 
 **Boo** is a ghost-faced audio/visual agent you talk to in a browser. It hears you (Parakeet v3), answers out loud in
 about half a second (Nemotron 3.5 Bolt and Fish Audio Drama 3), looks through your camera (Cosmos3-Edge), counts your
@@ -33,6 +33,24 @@ Two reference platforms, measured on the live stacks:
   Limitations), Python 3.11 or later, Node 22 or later for Eyes of Kai, and a browser with a microphone and camera.
   Safari on an iPhone works over HTTPS (for example through Tailscale Serve).
 - **Optional:** the Hermes back agent and a deep model; any ACP agent or OpenAI-compatible model can take their place.
+
+## See it work
+
+[![Watch the promo: Boo answering live facts, reading a desk through the camera, handing a task to Hermes and being renamed](docs/media/promo-poster.jpg)](https://github.com/drowzeys/keys-ghost-machine-audio-visual-agent/blob/main/docs/media/promo-landscape.mp4)
+
+Real recordings of the page, hands-free: [landscape, 1920×1080, 90 s](https://github.com/drowzeys/keys-ghost-machine-audio-visual-agent/blob/main/docs/media/promo-landscape.mp4) ·
+[phone cut, 1080×1920, 46 s](https://github.com/drowzeys/keys-ghost-machine-audio-visual-agent/blob/main/docs/media/promo-45s.mp4). The voices are synthetic Drama 3 voices and the desk is a
+computer-made scene; no person appears.
+
+## Screenshots
+
+| Phone (camera on) | Desktop |
+|---|---|
+| <img src="docs/media/ui-phone-camera.png" width="300" alt="Boo on a phone with the camera on, describing a desk with a WOW mug"> | <img src="docs/media/ui-desktop.png" width="560" alt="Boo on a desktop: name, agent, voice and Futuristic, camera scan and memory settings, and a live-fact answer"><br><br><img src="docs/media/ui-desktop-light.png" width="560" alt="The same page in the light theme"> |
+
+A task handed to Hermes: the card shows only the tool's name while it works, then the answer.
+
+<img src="docs/media/ui-hermes-card.png" width="640" alt="A Hermes task card showing terminal while working, then the answer">
 
 ## What happens in a turn
 
@@ -83,12 +101,22 @@ questions in real time, three passes each, on TensorFold 1.1.4.
 |---|---|---|
 | Voice-to-voice, median | 0.47–0.60 s | 0.55–0.77 s |
 | Speech recognition (Parakeet v3) | 72 ms | 86 ms |
+| Nemotron 3.5 Bolt, first token | 60 ms | 59 ms |
 | Drama 3 first audio, named voice (Vesper) | 122 ms | 121 ms |
 | Cosmos3 camera answer, first token / full | 79 ms / 0.25 s | 103 ms / 0.33 s |
 | Camera question, voice starts | 0.37–0.46 s | 0.60–0.73 s |
 | Left / right question, voice starts | 0.26–0.31 s | 0.55–0.74 s |
 | Live fact (search or weather), voice starts | 1.3–3.8 s | ≈ 2.6 s |
 | Back-agent task with tools | 30–50 s | 30–50 s |
+
+On TensorFold 1.1.3 the DGX Spark measured 0.92–0.95 s voice-to-voice, with Drama 3 first audio in Vesper at 415 ms
+and Bolt's first token at 95 ms.
+
+**What TensorFold 1.1.4 brought:** Drama 3 prompt rows in chunks on CUDA (`TF_DRAMA_PREFILL_ROWS`), idle unload
+(`--idle-unload`), a `/health` that turns 503 on a dead CUDA context, and attested voice catalogs upstream.
+**What is still ours** (in the [prebuilt builds](#prebuilt-builds)): Bolt on Metal, NVFP4 pruned Drama 3 experts, the
+voice-prefix cache, and the Cosmos3-Edge ports for Metal and CUDA. The DGX Spark's Drama 3 still runs on
+plotarmordev's NVFP4 fork, because stock 1.1.4 refuses the pruned checkpoint.
 
 ## Settings in the page
 
@@ -194,7 +222,33 @@ A profile names each engine and the turn timing:
 
 Please use [GitHub Issues](https://github.com/drowzeys/keys-ghost-machine-audio-visual-agent/issues).
 
-## Licence and credits
+## Licence
 
-The code is MIT (LICENSE). Every model, engine and library it uses, with its licence, is listed in
-[CREDITS.md](CREDITS.md).
+The code is MIT (LICENSE). Everything below keeps its own licence.
+
+## Credits
+
+| Component | What it does in Boo | Author / org | Licence | Link |
+|---|---|---|---|---|
+| Nemotron 3.5 Bolt | The front brain: answers most turns, with mood tags for the face | NVIDIA | NVIDIA Open Model License | [Hugging Face](https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB) |
+| Cosmos3-Edge | Camera questions and memory captions (its reasoner tower) | NVIDIA | OpenMDW 1.1 | [Hugging Face](https://huggingface.co/nvidia/Cosmos3-Edge) |
+| Parakeet TDT 0.6B v3 | Speech to text | NVIDIA | CC-BY-4.0 | [Hugging Face](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3) |
+| parakeet-mlx | Runs Parakeet on the Mac | senstella | Apache-2.0 | [GitHub](https://github.com/senstella/parakeet-mlx) |
+| NeMo | Runs Parakeet on the DGX Spark | NVIDIA | Apache-2.0 | [GitHub](https://github.com/NVIDIA/NeMo) |
+| Drama 3 | The voice (speech synthesis); the 14 named voices are takes of its built-in voice | Fish Audio | Fish Audio Community License | [Hugging Face](https://huggingface.co/fishaudio/drama-3) |
+| drama-3-NVFP4-Pruned, NVFP4 CUDA fork and named voices | The 4-bit pruned Drama 3 checkpoint, the DGX Spark's Drama engine and `--voices` | plotarmordev | Fish Audio Community License (weights) · Apache-2.0 (engine) | [checkpoint](https://huggingface.co/plotarmordev/drama-3-NVFP4-Pruned) · [fork](https://github.com/plotarmordev/TensorFold) |
+| TensorFold | The engine for Bolt, Drama 3 and Cosmos3-Edge, on Metal and CUDA | Ash Hart | Apache-2.0 | [GitHub](https://github.com/ashhart/TensorFold) |
+| Eyes of Kai | The continuity log: timestamped captions so Boo can answer about the past | tonyd2wild | MIT | [GitHub](https://github.com/tonyd2wild/eyes-of-kai) |
+| Hermes Agent | The back agent with tools and skills, over ACP | Nous Research | see repository | [GitHub](https://github.com/NousResearch/hermes-agent) |
+| qwen-audio-agent | Design inspiration: the frontstage/backstage split (a fast voice in front, a tool-using agent behind that reports back); no code from it is used | Qwen Audio team | Apache-2.0 | [GitHub](https://github.com/QwenAudio/qwen-audio-agent) |
+| RED-SNOW 5.3 Flash | The back agent's model in the reference setup (a GLM-5.3-Flash build); any OpenAI-compatible model works | RED-SNOW | see model card | — |
+| Silero VAD v5 | Hears when someone is speaking (`silero_vad.onnx` ships here) | Silero | MIT | [GitHub](https://github.com/snakers4/silero-vad) |
+| MediaPipe Face Detector and Hand Landmarker | Gaze tracking, exact finger counts and which hand, in the page | Google | Apache-2.0 | [GitHub](https://github.com/google-ai-edge/mediapipe) |
+| Three.js | Boo, the 3D ghost | three.js authors (mrdoob) | MIT | [GitHub](https://github.com/mrdoob/three.js) |
+| ddgs | Web search for quick live facts | deedy5 | MIT | [GitHub](https://github.com/deedy5/ddgs) |
+| wttr.in | Weather for quick live facts (data from WorldWeatherOnline) | Igor Chubin | Apache-2.0 | [GitHub](https://github.com/chubin/wttr.in) |
+| NVIDIA PyTorch container | The Docker image's base (`nvcr.io/nvidia/pytorch:26.07-py3`) | NVIDIA | NVIDIA Deep Learning Container License | [NGC](https://catalog.ngc.nvidia.com/orgs/nvidia/containers/pytorch) |
+| Qwen3.5-0.8B (earlier versions) | The first memory captioner | Qwen team, Alibaba Cloud | Apache-2.0 | [Hugging Face](https://huggingface.co/Qwen) |
+| AEON-7 Nemotron 3 Nano Omni build (earlier versions) | The first camera model, from NVIDIA's Nemotron 3 Nano Omni | AEON-7 | NVIDIA Open Model License | [Hugging Face](https://huggingface.co/AEON-7) |
+
+Full details: [CREDITS.md](CREDITS.md)
