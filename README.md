@@ -1,6 +1,25 @@
 # Keys Ghost Machine — audio/visual agent, powered by [TensorFold](https://github.com/ashhart/TensorFold)
 
-## What's new in v0.2.2
+## What's new in v0.3.0
+
+**TensorFold 1.1.5.** Bolt on a DGX Spark runs on the stock TensorFold 1.1.5 release, and the keys builds move to 1.1.5:
+Bolt and Cosmos3-Edge on the Mac (one `tensorfold-native` with `libbolt.dylib`) and Cosmos3-Edge on CUDA. To update,
+run the install command again, then `kgm restart`; in Docker,
+`docker pull ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:0.3.0`.
+
+- **Same answers, same speed.** On an M5 Ultra, against the 1.1.4 builds with the same flags: Bolt's greedy replies
+  are identical (7 of 7; first token 77–81 ms and about 96 tokens a second on both), and Cosmos3-Edge answers the
+  camera test pictures identically (7 of 7, first token 78 ms on both). On a DGX Spark Cosmos3-Edge's first token is
+  101–103 ms on both.
+- **The Mac's Drama 3 stays on the 1.1.4-keys.1 engine**, shipped in the Mac archive as `bin/tensorfold-drama`.
+  TensorFold 1.1.5 reads the NVFP4 pruned checkpoint on Metal and reuses a voice's reference prefill upstream, but on
+  an M5 Ultra its first audio in a named voice was 107–343 ms against a steady 67–79 ms for the keys engine (1.1.5
+  keeps one voice prefix per stream and restores whole prompt rounds only), so Boo keeps the faster engine. The DGX
+  Spark's Drama 3 is unchanged as well: plotarmordev's NVFP4 fork with the voice-prefix cache and the silence guard.
+- **The v0.2.2 fixes stay:** no Drama 3 keep-warm line on the DGX Spark, and cuBLASLt 13.1 for the TensorFold engines
+  in the Docker image.
+
+### v0.2.2
 
 **Full voice on a DGX Spark answers about twice as fast: 0.47–0.55 s voice to voice instead of 1.0–1.1 s** (Docker
 image, 7 synthetic questions, two passes, with 0.5 s and 8 s between turns). To update, run the install command again,
@@ -49,7 +68,7 @@ memory-constrained hardware: a DGX Spark that shares its memory with other work,
   docker run --gpus all --rm -p 8095:8095 -e VOICE_ENGINE=lite -e KAI=1 \
     -v ~/keys-ghost-machine/models/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB:/models/bolt \
     -v ~/keys-ghost-machine/models/cosmos3-tf:/models/cosmos3 -v ~/models/hf-cache:/models/hf-cache \
-    ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:0.2.2
+    ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:0.3.0
   ```
 - **Both, with a Full/Lite toggle:** install with `--voice both` (or `-e VOICE_ENGINE=both` in Docker, with the
   Drama 3 mount) and the page shows a **Full / Lite** switch per conversation; the voice list follows the engine.
@@ -157,7 +176,7 @@ Two reference platforms, measured on the live stacks:
   the camera model or Eyes of Kai is not offered by the installer and was not measured.
 - **What Lite gives up:** the 14 custom Drama 3 voices, voice cloning, Drama 3's expressiveness, and languages: Boo's
   lite voice speaks English only, so no German and none of the other European languages Drama 3 covers.
-- **Software:** TensorFold 1.1.4 (release binaries for Bolt; the Drama 3 and Cosmos3 builds are described under
+- **Software:** TensorFold 1.1.5 (release binaries for Bolt; the Drama 3 and Cosmos3 builds are described under
   Limitations), Python 3.11 or later, Node 22 or later for Eyes of Kai, and a browser with a microphone and camera.
   Safari on an iPhone works over HTTPS (for example through Tailscale Serve).
 - **Optional:** the Hermes back agent and a deep model; any ACP agent or OpenAI-compatible model can take their place.
@@ -165,7 +184,7 @@ Two reference platforms, measured on the live stacks:
 ## One-shot install
 
 One command on a DGX Spark or an Apple silicon Mac. It checks the machine against the requirements above, then installs
-everything under `~/keys-ghost-machine`: the agent, the TensorFold 1.1.4 builds (checksums verified), a Python
+everything under `~/keys-ghost-machine`: the agent, the TensorFold 1.1.5 builds (checksums verified), a Python
 environment, Eyes of Kai with its patch, the 14 voices and the models (Bolt, Drama 3 NVFP4, and Cosmos3-Edge converted
 to TensorFold's 8-bit format), then starts Boo. No sudo. Run it again to resume or update; finished parts are skipped.
 
@@ -212,7 +231,7 @@ says so.
 docker run --gpus all --rm -p 8095:8095 -e VOICE_ENGINE=lite \
   -v ~/keys-ghost-machine/models/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB:/models/bolt \
   -v ~/keys-ghost-machine/models/cosmos3-tf:/models/cosmos3 -v ~/models/hf-cache:/models/hf-cache -e KAI=1 \
-  ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:0.2.2
+  ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:0.3.0
 ```
 
 | Setting | What it does | Default |
@@ -253,7 +272,7 @@ docker run --gpus all --rm -p 8095:8095 \
   -v ~/keys-ghost-machine/models/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB:/models/bolt \
   -v ~/keys-ghost-machine/models/drama-3-NVFP4-Pruned:/models/drama \
   -v ~/keys-ghost-machine/models/cosmos3-tf:/models/cosmos3 -e KAI=1 \
-  ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:0.2.2
+  ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:0.3.0
 ```
 
 `-e VOICE_ENGINE=lite` (no Drama mount needed) or `both` picks the voice (see [docker/README.md](docker/README.md)).
@@ -363,30 +382,38 @@ Rules that make it behave:
 ## Measured speed
 
 Voice-to-voice is the end of your speech to the first sound of the reply, measured by a client streaming 16 recorded
-questions in real time, three passes each, on TensorFold 1.1.4.
+questions in real time (spoken by macOS voices), on TensorFold 1.1.5; on the Mac Drama 3 runs on the keys 1.1.4
+engine (see [What's new in v0.3.0](#whats-new-in-v030)).
 
 | Measure | Mac (M5 Ultra) | DGX Spark |
 |---|---|---|
-| Voice-to-voice, median | 0.47–0.60 s | 0.55–0.77 s |
-| Speech recognition (Parakeet v3) | 72 ms | 86 ms |
-| Nemotron 3.5 Bolt, first token | 60 ms | 59 ms |
-| Drama 3 first audio, named voice (Vesper) | ~60 ms | 121 ms |
-| Cosmos3 camera answer, first token / full | 79 ms / 0.25 s | 103 ms / 0.33 s |
+| Voice-to-voice, median, Full (Drama 3) | 0.45–0.71 s | 0.47–0.55 s |
+| Voice-to-voice, median, Lite (Kokoro) | 0.53–0.57 s | — |
+| Speech recognition (Parakeet v3) | 72–82 ms | 86 ms |
+| Nemotron 3.5 Bolt, first token | 60–80 ms | 59 ms |
+| Drama 3 first audio, named voice (Vesper) | 60–80 ms | 121 ms |
+| Cosmos3 camera answer, first token / full | 78 ms / 0.25–0.32 s | 101–103 ms / 0.33 s |
 | Camera question, voice starts | 0.37–0.46 s | 0.60–0.73 s |
 | Left / right question, voice starts | 0.26–0.31 s | 0.55–0.74 s |
 | Live fact (search or weather), voice starts | 1.3–3.8 s | ≈ 2.6 s |
 | Back-agent task with tools | 30–50 s | 30–50 s |
 
 The Mac's Drama 3 first audio is with the engine warm, as in a conversation (Boo keeps it warm while you speak):
-58–68 ms over 10 short lines on TensorFold 1.1.4 with the keys Metal build; after a second or more idle the first
-line takes about 125 ms.
+58–68 ms over 10 short lines with the keys Metal build (67–79 ms in the v0.3.0 checks across four voices); after a
+second or more idle the first line takes about 125 ms. Bolt's first token is 77–81 ms on 1.1.5 and 79–80 ms on 1.1.4
+in the same bench (the voice profile's system prompt, short spoken questions).
 
 On TensorFold 1.1.3 the DGX Spark measured 0.92–0.95 s voice-to-voice, with Drama 3 first audio in Vesper at 415 ms
 and Bolt's first token at 95 ms.
 
+**What TensorFold 1.1.5 brought:** NVFP4 pruned Drama 3 on Metal (#1268), reuse of a voice's reference prefill
+(#1237) and voice descriptions in `/v1/voices` (#1270), upstream. **What is still ours** on 1.1.5: Bolt on Metal,
+128 Drama 3 prompt rows a Metal round, the Cosmos3-Edge ports, and the Mac's Drama 3 engine itself (the 1.1.4-keys.1
+build, whose voice-prefix cache keeps every voice: 67–79 ms first audio against 107–343 ms for stock 1.1.5 on Metal).
+
 **What TensorFold 1.1.4 brought:** Drama 3 prompt rows in chunks on CUDA (`TF_DRAMA_PREFILL_ROWS`), idle unload
 (`--idle-unload`), a `/health` that turns 503 on a dead CUDA context, and attested voice catalogs upstream.
-**What is still ours** (in the [prebuilt builds](#prebuilt-builds)): Bolt on Metal, NVFP4 pruned Drama 3 experts, the
+**What was still ours on 1.1.4** (in the [prebuilt builds](#prebuilt-builds)): Bolt on Metal, NVFP4 pruned Drama 3 experts, the
 voice-prefix cache, and the Cosmos3-Edge ports for Metal and CUDA. The DGX Spark's Drama 3 still runs on
 plotarmordev's NVFP4 fork, because stock 1.1.4 refuses the pruned checkpoint.
 
@@ -421,29 +448,31 @@ take itself: after 3 s under −30 dBFS it drops the quiet tail and asks for the
 
 ## Prebuilt builds
 
-The [v0.2.2 release](https://github.com/drowzeys/keys-ghost-machine-audio-visual-agent/releases/tag/v0.2.2) has
-unofficial community builds of TensorFold 1.1.4 with everything Boo needs that upstream does not ship yet:
+The [v0.3.0 release](https://github.com/drowzeys/keys-ghost-machine-audio-visual-agent/releases/tag/v0.3.0) has
+unofficial community builds of TensorFold 1.1.5 with everything Boo needs that upstream does not ship yet:
 
-- `keys-boo-tensorfold-1.1.4-macos-arm64.tar.gz`: one `tensorfold-native` for Apple silicon that serves Nemotron 3.5
-  Bolt (with `libbolt.dylib`), Drama 3 NVFP4 with named voices and the voice-prefix cache, and Cosmos3-Edge on Metal.
-- `keys-boo-tensorfold-1.1.4-linux-aarch64.tar.gz`: for a DGX Spark, `tensorfold-cosmos3` (Cosmos3-Edge on CUDA) and
-  `tensorfold-drama3-nvfp4` (Drama 3 NVFP4 with the voice-prefix cache and, new in v0.2.0, 1.1.4's silence guard
-  flags). Bolt uses the stock
-  [TensorFold 1.1.4](https://github.com/ashhart/TensorFold/releases/tag/v1.1.4) release.
+- `keys-boo-tensorfold-1.1.5-macos-arm64.tar.gz`: for Apple silicon, `tensorfold-native` (TensorFold 1.1.5) that
+  serves Nemotron 3.5 Bolt (with `libbolt.dylib`) and Cosmos3-Edge on Metal, and `tensorfold-drama`, the unchanged
+  1.1.4-keys.1 engine for Drama 3 NVFP4 with named voices (128 prompt rows a GPU round, a voice-prefix cache that keeps
+  every voice, the silence guard), which starts speaking faster on Metal than stock 1.1.5.
+- `keys-boo-tensorfold-1.1.5-linux-aarch64.tar.gz`: for a DGX Spark, `tensorfold-cosmos3` (Cosmos3-Edge on CUDA) and
+  `tensorfold-drama3-nvfp4` (Drama 3 NVFP4 with the voice-prefix cache and the silence guard flags; unchanged, as
+  stock 1.1.5 still does not load the pruned checkpoint on CUDA). Bolt uses the stock
+  [TensorFold 1.1.5](https://github.com/ashhart/TensorFold/releases/tag/v1.1.5) release.
 
 Each archive has its own README with run commands, a change list, the licences and `SHA256SUMS`. The source is
-[drowzeys/TensorFold](https://github.com/drowzeys/TensorFold), branches `bolt-metal-114`, `drama3-metal-voices-114`,
-`cosmos3-metal-114`, `cosmos3-cuda-114` and `drama3-cuda-voices-guard` (`drama3-cuda-voices` plus the guard).
+[drowzeys/TensorFold](https://github.com/drowzeys/TensorFold), branches `bolt-metal-115`, `drama3-metal-voices-115`,
+`cosmos3-metal-115`, `cosmos3-cuda-115`, `bolt-metal-114` (the Mac's Drama 3 engine) and `drama3-cuda-voices-guard` (`drama3-cuda-voices` plus the guard).
 
 **Docker (DGX Spark):** the whole Spark stack in one image, without model weights
 (about 25 GB, built on NVIDIA's PyTorch container):
 
 ```sh
-docker pull ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:0.2.2
+docker pull ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:0.3.0
 docker run --gpus all --rm -p 8095:8095 \
   -v ~/models/bolt:/models/bolt -v ~/models/drama:/models/drama -v ~/models/cosmos3:/models/cosmos3 \
   -v ~/models/hf-cache:/models/hf-cache -e KAI=1 \
-  ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:0.2.2
+  ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:0.3.0
 ```
 
 Add `-e VOICE_ENGINE=lite` (and drop the Drama mount) for the lite voice, or `-e VOICE_ENGINE=both` for the Full/Lite
@@ -456,7 +485,7 @@ Mounts and settings are in [docker/README.md](docker/README.md).
 What the one-shot installer does, by hand:
 
 1. **Engines (TensorFold).** Serve, each on its own port:
-   - Nemotron 3.5 Bolt with the TensorFold 1.1.4 release (`tensorfold serve … --no-thinking --context 32768`), on
+   - Nemotron 3.5 Bolt with the TensorFold 1.1.5 release (`tensorfold serve … --no-thinking --context 32768`), on
      `:8091`.
    - Drama 3 NVFP4 with named voices: `--voices ~/voices/<mac|spark> --default-voice vesper` (voices from the Hugging
      Face repo), on `:8098` (Mac) or `:8093` (Spark). On a build with 1.1.4's silence guard add
@@ -518,12 +547,13 @@ A profile names each engine and the turn timing:
 - **Cosmos3-Edge on TensorFold** needs the Cosmos3 ports (a new Metal model family and its CUDA counterpart), which are
   not in TensorFold's upstream releases yet; use the [prebuilt builds](#prebuilt-builds). Without them, point `eyes`
   and `memory.captioner` at any OpenAI-compatible vision model that accepts PNG images.
-- **Drama 3 on the Mac** in the measured setup uses Metal changes offered upstream in
-  [plotarmordev/TensorFold #1](https://github.com/plotarmordev/TensorFold/pull/1) (prompt rows) and
-  [#2](https://github.com/plotarmordev/TensorFold/pull/2) (NVFP4 pruned experts), plus a voice prefix cache. The
+- **Drama 3 on the Mac** runs on the keys 1.1.4-keys.1 engine (`bin/tensorfold-drama` in the Mac archive): NVFP4
+  pruned experts on Metal, a voice-prefix cache that keeps every voice, and 128 prompt rows a GPU round (offered
+  upstream in [plotarmordev/TensorFold #1](https://github.com/plotarmordev/TensorFold/pull/1)). Stock TensorFold 1.1.5
+  reads the pruned checkpoint on Metal too (#1268, #1237) but starts speaking later (107–343 ms against 67–79 ms). The
   **DGX Spark** runs Drama 3 with [plotarmordev's TensorFold fork](https://github.com/plotarmordev/TensorFold) plus
-  the same voice-prefix cache and 1.1.4's silence guard flags; stock TensorFold 1.1.4 does not load the NVFP4 pruned
-  checkpoint yet.
+  a voice-prefix cache and the silence guard flags; stock TensorFold 1.1.5 does not load the NVFP4 pruned
+  checkpoint on CUDA yet.
 - Free-form camera descriptions ("describe what you see") can still name a side wrongly; questions about a side go
   through the reliable path above.
 - Live facts come from web search snippets, which can be out of date; ask the back agent for anything that needs

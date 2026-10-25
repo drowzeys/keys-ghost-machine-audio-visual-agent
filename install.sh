@@ -25,8 +25,8 @@
 set -euo pipefail
 
 REPO=drowzeys/keys-ghost-machine-audio-visual-agent
-RELEASE=${KGM_RELEASE:-v0.2.2}
-TF_VERSION=1.1.4
+RELEASE=${KGM_RELEASE:-v0.3.0}
+TF_VERSION=1.1.5
 KAI_COMMIT=7f2f02b
 KGM_HOME=${KGM_HOME:-$HOME/keys-ghost-machine}
 KGM_MODELS=${KGM_MODELS:-$KGM_HOME/models}
@@ -388,7 +388,7 @@ check() { case $1 in
   agent) curl -sf -m 2 -o /dev/null "127.0.0.1:$AGENT_PORT/health" ;;
   *)     curl -sf -m 2 -o /dev/null "127.0.0.1:$(port "$1")/v1/models" ;;
 esac; }
-# Drama 3 sometimes goes quiet after a sentence until the frame cap; TensorFold 1.1.4's silence guard redraws such a reply
+# Drama 3 sometimes goes quiet after a sentence until the frame cap; TensorFold 1.1.5's silence guard redraws such a reply
 # and ends such a stream (Boo then asks for the rest). Only builds that list the flags get them (the Mac build, and the
 # CUDA NVFP4 engine since v0.2.0); Boo's own check covers any other.
 GUARD="--silence-floor-dbfs=-30 --silence-seconds=4 --silence-mid-s=2 --silence-mid-min-voiced-s=1 --silence-redraws=3 --silence-redraw-budget-s=90"
@@ -403,7 +403,7 @@ launch() {
             exec "$TF_STOCK/bin/tensorfold-native" serve "$BOLT_DIR" --name nvidia-nemotron-3.5-bolt --host 127.0.0.1 \
               --port "$BOLT_PORT" --no-thinking --context 32768 --parallel 2 --no-update-check
           fi ;;
-    drama)  if [ "$PLATFORM" = mac ]; then d="$KB/bin/tensorfold-native"; else d="$KB/bin/tensorfold-drama3-nvfp4"; fi
+    drama)  if [ "$PLATFORM" = mac ]; then d="$KB/bin/tensorfold-drama"; else d="$KB/bin/tensorfold-drama3-nvfp4"; fi
             # shellcheck disable=SC2046 # the guard's flags are separate words
             exec env MODEL="$DRAMA_DIR" VOICES="$KGM_HOME/voices" VOICE=vesper PORT="$DRAMA_PORT" "$KB/scripts/serve-drama.sh" $(guard "$d") ;;
     cosmos) exec env MODEL="$COSMOS_DIR" PORT="$COSMOS_PORT" "$KB/scripts/serve-cosmos.sh" ;;

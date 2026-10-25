@@ -3,7 +3,7 @@
 # Model weights are not included: mount them under /models (see docker/README.md).
 FROM nvcr.io/nvidia/pytorch:26.07-py3
 
-ARG TF_VERSION=1.1.4
+ARG TF_VERSION=1.1.5
 ARG KAI_COMMIT=7f2f02b
 ENV DEBIAN_FRONTEND=noninteractive PIP_NO_CACHE_DIR=1 HF_HOME=/models/hf-cache
 
@@ -15,10 +15,10 @@ RUN curl -fsSL https://nodejs.org/dist/v22.14.0/node-v22.14.0-linux-arm64.tar.xz
     && ln -s /opt/node-v22.14.0-linux-arm64/bin/node /usr/local/bin/node \
     && ln -s /opt/node-v22.14.0-linux-arm64/bin/npm /usr/local/bin/npm
 
-# Stock TensorFold 1.1.4 for Bolt, and the Boo stack's CUDA builds (Cosmos3-Edge, Drama 3 NVFP4 with voices),
+# Stock TensorFold 1.1.5 for Bolt, and the Boo stack's CUDA builds (Cosmos3-Edge, Drama 3 NVFP4 with voices),
 # all from the build context (see docker/README.md)
 COPY tensorfold-${TF_VERSION}-linux-aarch64 /opt/tensorfold
-COPY keys-boo-tensorfold-1.1.4-linux-aarch64 /opt/keys-tensorfold
+COPY keys-boo-tensorfold-${TF_VERSION}-linux-aarch64 /opt/keys-tensorfold
 # The CUDA 13.1 cuBLASLt the TensorFold engines are qualified with, for them only (the entrypoint puts it first on their
 # library path; PyTorch keeps the base image's 13.6). On 13.6 Drama 3 turns its one-row tower kernel off and speaks
 # slower.

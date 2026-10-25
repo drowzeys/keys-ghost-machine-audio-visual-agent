@@ -1,7 +1,7 @@
 # Boo in Docker (DGX Spark)
 
 `ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent` runs the whole Spark stack in one container: Nemotron 3.5 Bolt
-on stock TensorFold 1.1.4, Drama 3 NVFP4 with the 14 voices and Cosmos3-Edge on the keys TensorFold builds, Parakeet v3
+on stock TensorFold 1.1.5, Drama 3 NVFP4 with the 14 voices and Cosmos3-Edge on the keys TensorFold builds, Parakeet v3
 (NeMo), the agent and page, and optionally Eyes of Kai and the lite voice (Kokoro-82M, `VOICE_ENGINE=lite` or `both`).
 Model weights are not in the image; mount them.
 
@@ -32,7 +32,7 @@ A model folder that is not mounted is skipped. Point at a server elsewhere inste
 docker run --gpus all --rm -p 8095:8095 \
   -v ~/models/bolt:/models/bolt -v ~/models/drama:/models/drama -v ~/models/cosmos3:/models/cosmos3 \
   -v ~/models/hf-cache:/models/hf-cache -e KAI=1 \
-  ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:0.2.2
+  ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:0.3.0
 ```
 
 Lite voice only (Kokoro-82M, no Drama 3 mount), or both with a Full/Lite switch in the page:
@@ -40,7 +40,7 @@ Lite voice only (Kokoro-82M, no Drama 3 mount), or both with a Full/Lite switch 
 ```sh
 docker run --gpus all --rm -p 8095:8095 -e VOICE_ENGINE=lite \
   -v ~/models/bolt:/models/bolt -v ~/models/cosmos3:/models/cosmos3 -v ~/models/hf-cache:/models/hf-cache \
-  ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:0.2.2
+  ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:0.3.0
 # both: add -v ~/models/drama:/models/drama and use -e VOICE_ENGINE=both
 ```
 
@@ -65,8 +65,8 @@ again.
 
 ## Build it yourself
 
-The build context is this repository plus three folders beside it: the official `tensorfold-1.1.4-linux-aarch64`
-archive, `keys-boo-tensorfold-1.1.4-linux-aarch64` from this repo's release, and `voices/` (the `voices/spark` files and
+The build context is this repository plus three folders beside it: the official `tensorfold-1.1.5-linux-aarch64`
+archive, `keys-boo-tensorfold-1.1.5-linux-aarch64` from this repo's release, and `voices/` (the `voices/spark` files and
 previews from the Hugging Face repo).
 
 ```sh

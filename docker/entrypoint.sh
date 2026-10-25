@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Starts the mounted models on TensorFold, then Boo's agent on 0.0.0.0:${BOO_PORT}.
-#   /models/bolt     Nemotron 3.5 Bolt 74B-A9B (TensorFold 24 GB layout)       -> stock TensorFold 1.1.4
+#   /models/bolt     Nemotron 3.5 Bolt 74B-A9B (TensorFold 24 GB layout)       -> stock TensorFold 1.1.5
 #   /models/drama    Drama 3 NVFP4 pruned (plotarmordev/drama-3-NVFP4-Pruned)  -> keys build (voices, NVFP4)
 #   /models/cosmos3  Cosmos3-Edge converted with tools/cosmos3_edge_to_mlx.py  -> keys build (Cosmos3 on CUDA)
 # A model whose folder is missing is skipped; its URL can point at another server instead (BOLT_URL, DRAMA_URL,
