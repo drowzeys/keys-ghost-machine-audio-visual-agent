@@ -31,7 +31,7 @@ A model folder that is not mounted is skipped. Point at a server elsewhere inste
 docker run --gpus all --rm -p 8095:8095 \
   -v ~/models/bolt:/models/bolt -v ~/models/drama:/models/drama -v ~/models/cosmos3:/models/cosmos3 \
   -v ~/models/hf-cache:/models/hf-cache -e KAI=1 \
-  ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:0.2.0
+  ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:0.2.1
 ```
 
 Lite voice only (Kokoro-82M, no Drama 3 mount), or both with a Full/Lite switch in the page:
@@ -39,7 +39,7 @@ Lite voice only (Kokoro-82M, no Drama 3 mount), or both with a Full/Lite switch 
 ```sh
 docker run --gpus all --rm -p 8095:8095 -e VOICE_ENGINE=lite \
   -v ~/models/bolt:/models/bolt -v ~/models/cosmos3:/models/cosmos3 -v ~/models/hf-cache:/models/hf-cache \
-  ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:0.2.0
+  ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:0.2.1
 # both: add -v ~/models/drama:/models/drama and use -e VOICE_ENGINE=both
 ```
 

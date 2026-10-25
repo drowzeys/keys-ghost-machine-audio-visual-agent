@@ -81,6 +81,40 @@ def hands_note(hands: list) -> str:
             "them: " + "; ".join(parts) + ".]")
 
 
+def stage_direction(names) -> re.Pattern:
+    """A reply's leading stage direction, "(Boo says)" or "(Hermes reports):", for the given speaker names."""
+
+    who = "|".join(re.escape(n) for n in names if n)
+    return re.compile(rf"^\s*\(\s*(?:{who})\s+(?:says|said|asks|reports|replies|answers)\s*\)\s*[:,-]?\s*", re.I)
+
+
+async def undirected(pieces, names):
+    """The reply without a leading stage direction such as "(Boo says)": a brain that sees a labelled line in the
+    history can start its own reply the same way, and the label must not be spoken or stored. The start of the reply
+    waits until it is clear (an open "(" waits for its ")", at most 48 characters); the rest goes straight through."""
+
+    pattern, head, cut = stage_direction(names), "", False  # cut: a direction was dropped, the reply starts next
+    async with aclosing(pieces) as source:
+        async for piece in source:
+            if head is None:
+                if cut:
+                    piece = piece.lstrip()
+                    cut = not piece
+                if piece:
+                    yield piece
+                continue
+            head += piece
+            start = head.lstrip()
+            if not start or (start.startswith("(") and ")" not in start and len(start) < 48):
+                continue
+            rest = pattern.sub("", head, count=1)
+            cut, head = rest != head and not rest.strip(), None
+            if rest.strip():
+                yield rest
+    if head:
+        yield pattern.sub("", head, count=1)
+
+
 def log(event) -> None:
     """One line per turn event in the server's output (agent.log): what was heard, said, handed over and how fast."""
 
@@ -378,8 +412,11 @@ class Conversation:
             await asyncio.sleep(0.25)
         self.reply = asyncio.create_task(speech())
 
-    async def say(self, text: str, source: str, mood: str = "happy", verb: str = "reports") -> None:
-        """Speaks a back agent's words as their own turn (interruptible like any other)."""
+    async def say(self, text: str, source: str, mood: str = "happy", verb: str = "reports", remember: bool = True) -> None:
+        """Speaks a back agent's words (or the assistant's own fixed line) as their own turn, interruptible like any
+        other. A back agent's words go in the history as "(Hermes reports) ..."; the assistant's own lines go in
+        plain, never as "(Boo says) ...", which the brain copied to the start of its next replies; and a line that
+        is no part of the conversation (the sample after a voice switch) is not kept at all (``remember=False``)."""
 
         spoken: list[str] = []
         self.heard = {"yes": True}
@@ -401,8 +438,9 @@ class Conversation:
             await self.emit({"type": "audio_end"})
         finally:
             self.speaking = False
-            if spoken:
-                self.history.append({"role": "assistant", "content": f"({source} {verb}) " + " ".join(spoken)})
+            if spoken and remember:
+                label = "" if source == self.name else f"({source} {verb}) "
+                self.history.append({"role": "assistant", "content": label + " ".join(spoken)})
 
     async def turn(self, audio: np.ndarray | None, text: str | None) -> None:
         clock = Clock()
@@ -576,7 +614,9 @@ class Conversation:
 
             started = False
             repeat: list[str] = []  # the line the brain began to say a second time, where its reply was ended
-            async for sentence in sentences(unrepeated(pieces(), repeat), **self.e.profile["voice"].get("chunks", {})):
+            names = [self.name] + [a.label for a in self.e.agents.values()]
+            async for sentence in sentences(unrepeated(undirected(pieces(), names), repeat),
+                                            **self.e.profile["voice"].get("chunks", {})):
                 clock.mark("first_sentence_ms")
                 await self.emit({"type": "reply", "text": sentence})
                 # closed at once when the turn is stopped, so the engine's speech slot is let go now, not at GC
@@ -680,12 +720,12 @@ def build(profile: dict) -> FastAPI:
                         talk.voice_name = spec.get("voice")
                         await offer_voices()
                         if not event.get("quiet"):
-                            asyncio.create_task(talk.when_quiet(lambda: talk.say("Hi, this is how I sound now.", talk.name, "happy", "says")))
+                            asyncio.create_task(talk.when_quiet(lambda: talk.say("Hi, this is how I sound now.", talk.name, "happy", "says", remember=False)))
                     elif event.get("type") == "voice" and event.get("name") in engines.voice_ids.get(talk.engine, ()):
                         changed = event["name"] != talk.voice_name
                         talk.voice_name = event["name"]
                         if changed and not event.get("quiet"):
-                            asyncio.create_task(talk.when_quiet(lambda: talk.say("Hi, this is how I sound now.", talk.name, "happy", "says")))
+                            asyncio.create_task(talk.when_quiet(lambda: talk.say("Hi, this is how I sound now.", talk.name, "happy", "says", remember=False)))
                     elif event.get("type") == "agent" and event.get("name") in engines.agents:
                         talk.agent = event["name"]
                     elif event.get("type") == "stop":

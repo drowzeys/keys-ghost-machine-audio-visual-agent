@@ -1,8 +1,27 @@
 # Keys Ghost Machine — audio/visual agent, powered by [TensorFold](https://github.com/ashhart/TensorFold)
 
-## What's new in v0.2.0
+## What's new in v0.2.1
 
-**Kokoro Lite, a second voice for smaller machines.** [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M)
+A fix release for v0.2.0. To update, run the install command again (it pulls the new code and keeps your models),
+then `kgm restart`; in Docker, `docker pull ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:0.2.1`.
+
+- **Fresh DGX Spark installs: the page could not connect** after Parakeet warmed up. NeMo's CUDA-graph decoder wrote a
+  NUL into Python's shared `b" "` object (an empty NVRTC log read into `b" " * 1`), which broke uvicorn's status lines
+  and websockets' parser and left damaged `.pyc` files. Boo now gives NVRTC its own buffer (the Docker
+  image was not affected).
+- **"(Boo says)" at the start of a reply:** after a switch of voice engine (Full/Lite) or voice, the sample line "Hi,
+  this is how I sound now." went into the conversation as "(Boo says) Hi, this is how I sound now.", and Bolt could
+  copy the label, or the whole line, into its next replies. The sample line is no longer kept in the conversation,
+  Boo's own short lines ("Okay, going ahead.") are kept without a label, and a reply that still starts with a stage
+  direction such as "(Boo says)" loses it before it is spoken or stored.
+- **Docs:** the Mac's Drama 3 first audio in [Measured speed](#measured-speed) is ~60 ms on TensorFold 1.1.4 (it said
+  122 ms, the figure after the engine has sat idle), matching the table below.
+
+The engine archives are unchanged from v0.2.0 (same files, same SHA-256), re-attached to the v0.2.1 release.
+
+### New in v0.2.0: Kokoro Lite, a second voice for smaller machines
+
+[Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M)
 (hexgrad, Apache-2.0) can now speak for Boo instead of Drama 3, or beside it with a switch in the page. It is for
 memory-constrained hardware: a DGX Spark that shares its memory with other work, or a Mac at the low end of the
 [requirements](#requirements). Everything else (Bolt, Cosmos3-Edge, Parakeet, Eyes of Kai, Hermes) stays the same.
@@ -16,7 +35,7 @@ memory-constrained hardware: a DGX Spark that shares its memory with other work,
   docker run --gpus all --rm -p 8095:8095 -e VOICE_ENGINE=lite -e KAI=1 \
     -v ~/keys-ghost-machine/models/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB:/models/bolt \
     -v ~/keys-ghost-machine/models/cosmos3-tf:/models/cosmos3 -v ~/models/hf-cache:/models/hf-cache \
-    ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:0.2.0
+    ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:0.2.1
   ```
 - **Both, with a Full/Lite toggle:** install with `--voice both` (or `-e VOICE_ENGINE=both` in Docker, with the
   Drama 3 mount) and the page shows a **Full / Lite** switch per conversation; the voice list follows the engine.
@@ -50,7 +69,7 @@ Spark: Lite is twice as fast and frees ~40 GB. Mac: same speed, so run `both` an
 Choose Drama for a signature voice, cloning, emotion or German; choose Kokoro for small or shared hardware, an Apache
 licence or the lowest delay.
 
-**Fixes**
+**Fixes in v0.2.0**
 
 - **Drama 3 long-line stalls:** a long reply that went quiet after its first sentence (on about 1 in 5 paragraph-length
   lines) is now caught. The DGX Spark's Drama 3 build gains TensorFold 1.1.4's silence guard (new in the v0.2.0
@@ -62,17 +81,13 @@ licence or the lowest delay.
   microphone (it stops on disconnect, after 2 s without audio and after 60 s), warms with one "Mm." at a time and never
   while anything is being said; a refused line is asked again for up to `retry_s` (6 s) instead of being lost; a
   stopped turn frees its speech slot at once.
-- **DGX Spark installs: the page could not connect** after Parakeet warmed up. NeMo's CUDA-graph decoder wrote a NUL
-  into Python's shared `b" "` object (an empty NVRTC log read into `b" " * 1`), which broke uvicorn's status lines and
-  websockets' parser and left damaged `.pyc` files. Boo now gives NVRTC its own buffer (the Docker image was not
-  affected).
 - **Bolt repetition loops:** a reply that starts repeating a sentence it already said ends there, unsaid.
 - **Interrupted replies** stopped before their first word no longer leave "(interrupted)" in the history for the
   brain to copy.
 - The reference Mac now runs `voice_engine: both`, with the Full/Lite toggle tested live.
 
-Builds: [v0.2.0 release](https://github.com/drowzeys/keys-ghost-machine-audio-visual-agent/releases/tag/v0.2.0) ·
-`docker pull ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:0.2.0`
+Builds: [v0.2.1 release](https://github.com/drowzeys/keys-ghost-machine-audio-visual-agent/releases/tag/v0.2.1) ·
+`docker pull ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:0.2.1`
 
 <a href="https://github.com/drowzeys/keys-ghost-machine-audio-visual-agent/blob/main/docs/media/promo-45s.mp4"><img src="docs/media/promo-45s-poster.jpg" width="300" alt="Play the 46-second demo: Boo answering a live fact, reading a desk through the camera, handing a task to Hermes and being renamed"></a>
 
@@ -183,7 +198,7 @@ says so.
 docker run --gpus all --rm -p 8095:8095 -e VOICE_ENGINE=lite \
   -v ~/keys-ghost-machine/models/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB:/models/bolt \
   -v ~/keys-ghost-machine/models/cosmos3-tf:/models/cosmos3 -v ~/models/hf-cache:/models/hf-cache -e KAI=1 \
-  ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:0.2.0
+  ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:0.2.1
 ```
 
 | Setting | What it does | Default |
@@ -224,7 +239,7 @@ docker run --gpus all --rm -p 8095:8095 \
   -v ~/keys-ghost-machine/models/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB:/models/bolt \
   -v ~/keys-ghost-machine/models/drama-3-NVFP4-Pruned:/models/drama \
   -v ~/keys-ghost-machine/models/cosmos3-tf:/models/cosmos3 -e KAI=1 \
-  ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:0.2.0
+  ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:0.2.1
 ```
 
 `-e VOICE_ENGINE=lite` (no Drama mount needed) or `both` picks the voice (see [docker/README.md](docker/README.md)).
@@ -341,12 +356,16 @@ questions in real time, three passes each, on TensorFold 1.1.4.
 | Voice-to-voice, median | 0.47–0.60 s | 0.55–0.77 s |
 | Speech recognition (Parakeet v3) | 72 ms | 86 ms |
 | Nemotron 3.5 Bolt, first token | 60 ms | 59 ms |
-| Drama 3 first audio, named voice (Vesper) | 122 ms | 121 ms |
+| Drama 3 first audio, named voice (Vesper) | ~60 ms | 121 ms |
 | Cosmos3 camera answer, first token / full | 79 ms / 0.25 s | 103 ms / 0.33 s |
 | Camera question, voice starts | 0.37–0.46 s | 0.60–0.73 s |
 | Left / right question, voice starts | 0.26–0.31 s | 0.55–0.74 s |
 | Live fact (search or weather), voice starts | 1.3–3.8 s | ≈ 2.6 s |
 | Back-agent task with tools | 30–50 s | 30–50 s |
+
+The Mac's Drama 3 first audio is with the engine warm, as in a conversation (Boo keeps it warm while you speak):
+58–68 ms over 10 short lines on TensorFold 1.1.4 with the keys Metal build; after a second or more idle the first
+line takes about 125 ms.
 
 On TensorFold 1.1.3 the DGX Spark measured 0.92–0.95 s voice-to-voice, with Drama 3 first audio in Vesper at 415 ms
 and Bolt's first token at 95 ms.
@@ -388,7 +407,7 @@ take itself: after 3 s under −30 dBFS it drops the quiet tail and asks for the
 
 ## Prebuilt builds
 
-The [v0.2.0 release](https://github.com/drowzeys/keys-ghost-machine-audio-visual-agent/releases/tag/v0.2.0) has
+The [v0.2.1 release](https://github.com/drowzeys/keys-ghost-machine-audio-visual-agent/releases/tag/v0.2.1) has
 unofficial community builds of TensorFold 1.1.4 with everything Boo needs that upstream does not ship yet:
 
 - `keys-boo-tensorfold-1.1.4-macos-arm64.tar.gz`: one `tensorfold-native` for Apple silicon that serves Nemotron 3.5
@@ -406,11 +425,11 @@ Each archive has its own README with run commands, a change list, the licences a
 (about 25 GB, built on NVIDIA's PyTorch container):
 
 ```sh
-docker pull ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:0.2.0
+docker pull ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:0.2.1
 docker run --gpus all --rm -p 8095:8095 \
   -v ~/models/bolt:/models/bolt -v ~/models/drama:/models/drama -v ~/models/cosmos3:/models/cosmos3 \
   -v ~/models/hf-cache:/models/hf-cache -e KAI=1 \
-  ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:0.2.0
+  ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:0.2.1
 ```
 
 Add `-e VOICE_ENGINE=lite` (and drop the Drama mount) for the lite voice, or `-e VOICE_ENGINE=both` for the Full/Lite
