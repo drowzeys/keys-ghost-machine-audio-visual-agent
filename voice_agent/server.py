@@ -49,6 +49,23 @@ EYES_SYSTEM = ("You are {name}, a friendly voice assistant looking through the u
                "no markdown.")
 
 
+def tool_name(step: str) -> str:
+    """A back agent's step as only its tool's name ("terminal", "web_search"): the page never shows the command, path
+    or address the tool was given, so a shared screen or recording can't leak them."""
+
+    name = re.split(r"[:(\s]", step.strip(), maxsplit=1)[0]
+    return name[:40] or "tool"
+
+
+def step_text(kind: str, value: str) -> str:
+    """What a task card shows for a step: the tool's name, or for a permission "allowed · terminal"."""
+
+    if kind == "permission" and ": " in value:
+        option, title = value.split(": ", 1)
+        return f"{'allowed' if option.startswith('allow') else 'denied'} · {tool_name(title)}"
+    return tool_name(value)
+
+
 def hands_note(hands: list) -> str:
     """The page's hand tracking as plain facts for the brain (landmarks are exact; a vision model miscounts fingers)."""
 
@@ -285,7 +302,7 @@ class Conversation:
 
         def progress(kind: str, value: str) -> None:
             asyncio.create_task(self.send({"type": "task", "id": task, "agent": agent.label, "state": "step",
-                                           "kind": kind, "text": value[:160]}))
+                                           "kind": kind, "text": step_text(kind, value)}))
 
         async def confirm(title: str, kind: str) -> str:
             """Asks the person, out loud and on the page, whether the agent may use a tool; 90 s without an answer
@@ -294,7 +311,7 @@ class Conversation:
             ask = self.asking = {"id": f"c{id(title) % 100000}", "future": asyncio.get_running_loop().create_future()}
             words = f"{agent.label} wants to {backstage.plain_tool(title, kind)}"
             await self.send({"type": "confirm", "id": ask["id"], "task": task, "agent": agent.label, "text": words,
-                             "detail": title[:240]})
+                             "detail": tool_name(title)})
             await self.when_quiet(lambda: self.say(f"{words}. Should I go ahead?", agent.label, "curious", "asks"))
             try:
                 choice = await asyncio.wait_for(ask["future"], 90)
