@@ -122,6 +122,11 @@ def log(event) -> None:
         print(time.strftime("%H:%M:%S"), json.dumps({k: (v[:200] if isinstance(v, str) else v) for k, v in event.items()}), flush=True)
 
 
+# added to the front brain's instructions when the profile has the video panel (unless they already speak of it)
+VIDEO_NOTE = ("You can make videos: they appear in the video panel beside you. For any request to make, generate, "
+              "create or show a video, clip or movie, the video agent makes it; say one short line that you are on it and "
+              "never say you can't.")
+
 ENGINE_LABELS = {"full": "Full (Drama 3)", "lite": "Lite (Kokoro)"}
 MOODS = {"neutral", "happy", "excited", "curious", "thinking", "surprised", "concerned", "sad", "playful"}
 
@@ -177,7 +182,7 @@ class Engines:
         elif kind == "done":
             words = "The video is ready." if done == 1 else f"The video is finished, {done} clips."
         else:
-            words = "The video stopped: " + str(run.get("message") or "something went wrong")[:120]
+            words = "The video stopped. " + str(run.get("said") or "The panel has the details.")[:120]  # the reason in full is in the panel
         talk = max(self.talks, key=lambda t: t.active_at)
         asyncio.create_task(talk.when_quiet(lambda: talk.say(words, talk.name, "happy" if kind != "failed" else "concerned",
                                                             "says", remember=False)))
@@ -204,7 +209,10 @@ class Conversation:
         self.in_speech, self.voiced, self.silent = False, 0, 0
         self.reply: asyncio.Task | None = None
         self.speaking = False
-        self.history = [{"role": "system", "content": engines.profile["brain"].get("system", "You are a helpful voice assistant.")}]
+        system = engines.profile["brain"].get("system", "You are a helpful voice assistant.")
+        if engines.video and "video panel" not in system:  # it can make videos: it must never say it can't
+            system = f"{system} {VIDEO_NOTE}"
+        self.history = [{"role": "system", "content": system}]
         self.send_lock = asyncio.Lock()
         self.warming: asyncio.Event | None = None  # set = stop warming
         self.audio_at = 0.0  # when the microphone last sent audio
@@ -408,6 +416,33 @@ class Conversation:
             await asyncio.sleep(0.03)
         self.start_task(agent, text, last)
 
+    async def video_turn(self, agent, text: str, heard: dict) -> str:
+        """A turn about the video, answered by the video agent alone: one short line, spoken as this turn's reply (the
+        front brain says nothing, so there is never a second, contradictory answer). The whole story, a refusal's
+        reason with its numbers, goes to the page's task card and the panel; only the short line is spoken."""
+
+        while not heard["yes"]:  # a quiet turn: only once the person has really stopped (no video for half a sentence)
+            await asyncio.sleep(0.03)
+        task = f"t{id(text) % 100000}"
+        await self.send({"type": "task", "id": task, "agent": agent.label, "state": "started"})
+
+        def progress(kind: str, value: str) -> None:
+            if kind == "video":  # the video agent's word to the panel ("show" the last clip)
+                try:
+                    asyncio.create_task(self.send({"type": "video", **json.loads(value)}))
+                except ValueError:
+                    pass
+
+        started = time.monotonic()
+        try:
+            said, detail = await agent.handle(text, progress)
+        except Exception as error:
+            await self.send({"type": "task", "id": task, "agent": agent.label, "state": "error", "text": str(error)[:300]})
+            return "Something went wrong with the video. The panel has the details."
+        await self.send({"type": "task", "id": task, "agent": agent.label, "state": "done", "text": detail,
+                         "seconds": round(time.monotonic() - started, 1)})
+        return said
+
     async def backstage(self, agent, prompt: str) -> None:
         """A back agent's task: its steps go to the page as they happen, its answer is spoken once nobody is talking."""
 
@@ -602,14 +637,18 @@ class Conversation:
             # model copies their brackets around a whole answer
             note = EYES_SYSTEM.format(name=self.name) if picture is not None else None
             looked_up = None
-            if self.e.lookup and backstage.LIVE.search(text.lower()) and not (agent and backstage.asked_for(text, agent, live=False)):
+            if agent and agent.kind == "video":  # found in code ("make a video of ..."): the video agent answers alone
+                brain, picture, last, note = Said(await self.video_turn(agent, text, heard)), None, None, None
+                handed[0] = True
+                clock.mark("deep_ms")
+            elif self.e.lookup and backstage.LIVE.search(text.lower()) and not (agent and backstage.asked_for(text, agent, live=False)):
                 # a live fact: search now and let the front brain answer in this turn (seconds, not a back agent's half minute)
                 await self.emit({"type": "emotion", "emotion": "thinking"})
                 looked_up = await lookup.look_up(text, self.e.lookup)
                 clock.mark("lookup_ms")
                 if looked_up:
                     last, brain, picture = looked_up, self.e.brain, None
-            if looked_up:
+            if looked_up or handed[0]:
                 pass
             elif agent and backstage.asked_for(text, agent):  # "ask Hermes ...", live facts: hand over at once
                 await hand_over()

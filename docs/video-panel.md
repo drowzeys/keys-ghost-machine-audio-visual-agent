@@ -25,13 +25,24 @@ its event stream only while it is unfolded and the page is visible.
 
 ## By voice
 
-The voice uses the same hand-over as the other back agents (`backstage.claims`). A turn about the video goes to the video
-agent, whichever back agent the page has picked. Boo says a short "On it." The request runs in the background and the
-answer is spoken once nobody is talking.
+A request for a video is found in code before any model sees the turn (`video.asked`, through `backstage.claims`):
+"generate a video of a dragon over a castle", "can you make me a short film about …", "show me a clip of …", "I want an
+endless video of …". Talk about a video ("I watched a video yesterday", "I made a film", "a video call") is left alone.
+The video agent answers that turn itself, with one short spoken line, and the front brain says nothing, so there is
+never a second reply. The idea is the words after the request ("of a dragon over a castle"). With no subject ("make a
+video") it asks "What should the video show?", and the next thing said (within 90 s) is the idea; "never mind" drops
+it.
+
+A refusal is spoken short and plain ("The video machine is busy right now, so I can't render yet."). The full reason,
+such as the Studio's memory estimate, goes to the task card and the panel's status line.
+
+When the profile has a `video` section, the front brain's instructions also get one line (`server.VIDEO_NOTE`): it can
+make videos in the video panel, the video agent makes them, and it never says it can't.
 
 | Say | Does |
 |---|---|
 | "Boo, make a video of a lighthouse in a storm" | one clip |
+| "make a video" … "a red kite over green hills" | asks what it should show, then one clip of the answer |
 | "make an endless video of waves on a reef", "… a story about …" | continue mode: clip after clip until stopped |
 | "stop the video" | stops and cancels the render at work |
 | "show me the last clip" | plays it in the panel (and unfolds it) |
@@ -70,7 +81,8 @@ Every renderer implements one interface (`Renderer`): `room`, `keyframe`, `submi
   (`progress: {stage, at, of}`, `estimate`, `elapsed`, `outputs`) and fetched from `/files/<path in the Studio
   folder>`. A continue clip sets `first_frame_from` to the clip before, so the Studio opens it on that clip's last
   frame. With `"keyframe": true`, a still is made first as a `scout` job and the clip is rendered from it (`image`). The
-  Studio's `/api/estimate` memory check runs before a run starts, and its refusal is passed on word for word.
+  Studio's `/api/estimate` memory check runs before a run starts. Its refusal is shown in full in the panel, and
+  the voice says only that the video machine is busy.
 - **`hyperflow`**: a stub for the infinity engine below. It refuses with "isn't built yet".
 
 ### Where clips are made

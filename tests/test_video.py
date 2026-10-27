@@ -205,3 +205,146 @@ def test_film_of_one_clip_is_the_clip(tmp_path):
 
     svc, path = asyncio.run(go())
     assert Path(path).name == "clip000.mp4"
+
+
+# ----- asking for a video by voice: found in code, one short reply a turn (synthetic phrasings only) -----
+
+def full_studio(request):
+    if request.url.path == "/api/estimate":  # the render host busy with something else
+        return httpx.Response(200, json={"memory": {"fits": False, "reason": "this clip needs about 58 GB at its peak "
+                                                    "(give or take 6); this machine has 39 GB for it and keeps 12"}})
+    return FakeStudio()(request)
+
+
+def agents_with(svc):
+    agent = video.VideoAgent("video", {}, svc)
+    other = type("Other", (), {"name": "hermes", "label": "Hermes", "kind": "acp"})()
+    return agent, {"hermes": other, "video": agent}
+
+
+@pytest.mark.parametrize("said, idea", [
+    ("generate a video of a dragon over a castle", "a dragon over a castle"),
+    ("Can you make me a video about a lighthouse in a storm?", "a lighthouse in a storm"),
+    ("create a clip of rain on a tin roof", "rain on a tin roof"),
+    ("render a video of a paper boat on a river please", "a paper boat on a river"),
+    ("show me a video of a red kite over green hills", "a red kite over green hills"),
+    ("Boo, make a short film about a robot learning to paint", "a robot learning to paint"),
+    ("make an endless video of waves on a reef", "waves on a reef"),
+    ("could you generate me a ten second clip of a fox in the snow", "a fox in the snow"),
+    ("I want a video of a hot air balloon at dawn", "a hot air balloon at dawn"),
+])
+def test_requests_route_to_the_video_agent_with_their_idea(tmp_path, said, idea):
+    svc = service(tmp_path, FakeStudio(steps=50))
+    agent, agents = agents_with(svc)
+    assert claims(said, agents, agents["hermes"]) is agent and claims(said, agents, None) is agent
+
+    async def go():
+        spoken, _ = await agent.handle(said, lambda k, v: None)
+        await svc.stop()
+        return spoken
+
+    assert asyncio.run(go()).startswith("Starting the video")
+    assert svc.run["idea"] == idea
+    assert svc.run["mode"] == ("continue" if "endless" in said else "single")
+
+
+@pytest.mark.parametrize("said", ["I watched a video yesterday", "I made a video yesterday", "do you like this movie",
+                                  "the end of the movie was sad", "what's the weather", "make a video call to my sister",
+                                  "how do I make a video in an editor", "I'm going to make a video for school",
+                                  "that film was great", "can you show me how to do this"])
+def test_talk_about_videos_is_not_a_request(tmp_path, said):
+    svc = service(tmp_path, FakeStudio())
+    agent, agents = agents_with(svc)
+    assert claims(said, agents, agents["hermes"]) is None and claims(said, agents, None) is None
+
+
+def test_no_subject_asks_once_and_takes_the_next_words_as_the_idea(tmp_path):
+    svc = service(tmp_path, FakeStudio(steps=50))
+    agent, agents = agents_with(svc)
+
+    async def go():
+        for said in ("make a video", "Can you make a video?", "generate a video for me please"):
+            assert claims(said, agents, None) is agent, said
+            assert await agent.handle(said, lambda k, v: None) == ("What should the video show?",) * 2
+            assert svc.run is None
+        # the answer: not a request on its own, taken because the agent asked
+        assert claims("um, a red kite over green hills", agents, None) is agent
+        spoken, _ = await agent.handle("um, a red kite over green hills", lambda k, v: None)
+        assert spoken.startswith("Starting the video") and svc.run["idea"] == "a red kite over green hills"
+        # answered: the next words are the front brain's again
+        assert claims("tell me a joke", agents, None) is None
+        await svc.stop()
+
+    asyncio.run(go())
+
+
+def test_no_subject_then_never_mind_or_a_question(tmp_path):
+    svc = service(tmp_path, FakeStudio())
+    agent, agents = agents_with(svc)
+
+    async def go():
+        await agent.handle("make a video", lambda k, v: None)
+        assert claims("what time is it", agents, None) is None  # a question of their own: the front brain's
+        assert claims("never mind", agents, None) is agent
+        assert await agent.handle("never mind", lambda k, v: None) == ("Okay, no video then.",) * 2
+        assert svc.run is None and claims("a fox in the snow", agents, None) is None
+
+    asyncio.run(go())
+
+
+def test_refusals_are_short_to_say_and_whole_in_the_panel(tmp_path):
+    svc = service(tmp_path, full_studio)
+    agent, _ = agents_with(svc)
+    spoken, detail = asyncio.run(agent.handle("make a video of a red kite over green hills", lambda k, v: None))
+    assert spoken == "The video machine is busy right now, so I can't render yet."
+    assert "58 GB" in detail and "58" not in spoken
+    assert "58 GB" in svc.snapshot()["message"]  # the panel's status line has the reason
+
+    def down(request):
+        raise httpx.ConnectError("refused")
+
+    svc = service(tmp_path, down)
+    agent, _ = agents_with(svc)
+    spoken, _ = asyncio.run(agent.handle("make a video of a fox", lambda k, v: None))
+    assert spoken == "The video machine isn't answering right now, so I can't render yet."
+
+
+def test_a_video_turn_gets_exactly_one_reply_and_the_brain_stays_quiet(tmp_path):
+    server = pytest.importorskip("voice_agent.server")
+    svc = service(tmp_path, full_studio)
+    agent, _ = agents_with(svc)
+
+    class Brain:
+        calls = 0
+
+        async def stream(self, messages, image_png=None):
+            Brain.calls += 1
+            yield "[happy] I can't create media directly."
+
+    class Voice:
+        sample_rate = 24000
+
+        async def stream(self, sentence, name=None):
+            yield b"\0\0"
+
+    engines = type("E", (), {})()
+    engines.profile = {"voice": {}, "brain": {"system": "You are a friendly voice assistant."}}
+    engines.brain, engines.eyes, engines.memory, engines.lookup = Brain(), None, None, None
+    engines.agents, engines.voices, engines.video = {"video": agent}, {"full": Voice()}, svc
+    talk = server.Conversation.__new__(server.Conversation)
+    talk.e, talk.engine, talk.voice_name, talk.name, talk.agent = engines, "full", None, "Boo", None
+    talk.history = [{"role": "system", "content": "You are a friendly voice assistant."}]
+    talk.held, talk.asking, talk.frame, talk.frame_at, talk.visual, talk.hands = None, None, None, 0.0, None, []
+    talk.speaking, talk.heard = False, {"yes": True}
+    events = []
+
+    async def record(event):
+        events.append(event)
+
+    talk.emit = talk.send = record
+    asyncio.run(talk.turn(None, "make a video of a red kite over green hills"))
+    replies = [e["text"] for e in events if isinstance(e, dict) and e.get("type") == "reply"]
+    assert Brain.calls == 0
+    assert " ".join(replies) == "The video machine is busy right now, so I can't render yet.", events  # one reply
+    assert talk.history[-1] == {"role": "assistant", "content": " ".join(replies)}
+    assert any(e.get("type") == "task" and "58 GB" in e.get("text", "") for e in events if isinstance(e, dict))

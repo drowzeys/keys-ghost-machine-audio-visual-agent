@@ -60,7 +60,16 @@ STATES = ("idle", "planning", "keyframe", "rendering", "checking", "done", "stop
 
 
 class Refused(Exception):
-    """Said to the person as it is: why a run cannot start or go on."""
+    """Why a run cannot start or go on. ``str(error)`` is the whole reason, for the panel and the status; ``said`` is the
+    short plain line the voice speaks ("The video machine is busy right now, so I can't render yet.")."""
+
+    def __init__(self, detail: str, said: str | None = None) -> None:
+        super().__init__(detail)
+        self.said = said or (detail if len(detail) <= 90 else "The video machine said no. The panel has the details.")
+
+
+BUSY = "The video machine is busy right now, so I can't render yet."
+DOWN = "The video machine isn't answering right now, so I can't render yet."
 
 
 # ---------------------------------------------------------------------------------------------------- the renderers
@@ -83,8 +92,8 @@ class Renderer:
     name = "renderer"
     previews = False  # True when its Progress names real pictures of the clip as it renders
 
-    async def room(self, clip: dict) -> str | None:
-        """None when the clip can be made now, else why not (said aloud)."""
+    async def room(self, clip: dict) -> Refused | None:
+        """None when the clip can be made now, else why not."""
         return None
 
     async def keyframe(self, prompt: str, seed: int) -> str:
@@ -134,24 +143,25 @@ class StudioRenderer(Renderer):
         try:
             reply = await self.client.request(method, self.url + path, json=body, headers={"X-Studio-Key": key} if key else {})
         except httpx.HTTPError as error:
-            raise Refused(f"I can't reach the Studio right now ({type(error).__name__}).") from None
+            raise Refused(f"I can't reach the Studio right now ({type(error).__name__}).", DOWN) from None
         if reply.status_code == 401:
-            raise Refused("The Studio wants its access key, and the one I have doesn't work.")
+            raise Refused("The Studio wants its access key, and the one I have doesn't work.",
+                          "The video machine won't let me in right now.")
         if reply.status_code >= 400:
             try:
                 said = reply.json()
                 said = said.get("error") or said.get("detail") or reply.reason_phrase
             except ValueError:
                 said = reply.reason_phrase
-            raise Refused(f"The Studio said: {str(said)[:160]}")
+            raise Refused(f"The Studio said: {str(said)[:160]}", "The video machine turned that down. The panel has the details.")
         return reply.json()
 
-    async def room(self, clip: dict) -> str | None:
+    async def room(self, clip: dict) -> Refused | None:
         """The Studio's own memory check for this clip (a DGX Spark answers it; a Mac says nothing)."""
         said = await self.call("POST", "/api/estimate", self.params(clip, None))
         memory = said.get("memory") or {}
         if memory and memory.get("fits") is False:
-            return f"The render host has no room for this clip now: {str(memory.get('reason') or '')[:140]}"
+            return Refused(f"The render host has no room for this clip now: {str(memory.get('reason') or '')[:140]}", BUSY)
         return None
 
     @staticmethod
@@ -248,11 +258,12 @@ class HyperFlowRenderer(Renderer):
     def __init__(self, spec: dict) -> None:
         self.url = spec.get("url")
 
-    async def room(self, clip: dict) -> str | None:
-        return "The HyperFlow infinity engine isn't built yet; use the Studio renderer for now."
+    async def room(self, clip: dict) -> Refused | None:
+        return Refused("The HyperFlow infinity engine isn't built yet; use the Studio renderer for now.",
+                       "That video engine isn't ready yet.")
 
     async def submit(self, clip: dict) -> str:
-        raise Refused("The HyperFlow infinity engine isn't built yet.")
+        raise Refused("The HyperFlow infinity engine isn't built yet.", "That video engine isn't ready yet.")
 
 
 RENDERERS = {"studio": StudioRenderer, "hyperflow": HyperFlowRenderer}
@@ -387,6 +398,7 @@ class VideoService:
         self.still: bytes | None = None  # the picture the page shows while the clip renders
         self.preview_ref: str | None = None
         self.listeners: set[asyncio.Queue] = set()
+        self.notice: str | None = None  # why the last start was refused, in full: shown in the panel, never spoken
         self.on_news: list[Callable[[str, dict], None]] = []  # spoken updates: ("clip"|"done"|"failed", run)
 
     # ----- what the page sees -----
@@ -394,7 +406,7 @@ class VideoService:
     def snapshot(self) -> dict:
         run = self.run
         if not run:
-            return {"run": None, "state": "idle", "clips": [], "renderer": self.renderer.name,
+            return {"run": None, "state": "idle", "clips": [], "renderer": self.renderer.name, "message": self.notice,
                     "previews": "engine" if self.renderer.previews else "progress"}
         clips = [{"index": c["index"], "beat": c.get("beat"), "prompt": c["prompt"], "seconds": c.get("seconds"),
                   "url": f"/api/video/clip/{run['id']}/{c['index']}.mp4",
@@ -402,7 +414,7 @@ class VideoService:
                  for c in run["clips"] if c.get("state") == "done"]
         current = next((c for c in reversed(run["clips"]) if c.get("state") not in ("done",)), None)
         return {"run": run["id"], "state": run["state"], "mode": run["mode"], "idea": run["idea"],
-                "count": run.get("count"), "message": run.get("message"), "renderer": self.renderer.name,
+                "count": run.get("count"), "message": self.notice or run.get("message"), "renderer": self.renderer.name,
                 "previews": "engine" if self.renderer.previews else "progress", "clips": clips,
                 "current": {"index": current["index"], "beat": current.get("beat"), "prompt": current.get("prompt"),
                             "state": current.get("state"), **self.live} if current and run["state"] not in ("done", "stopped", "failed") else None,
@@ -454,16 +466,16 @@ class VideoService:
 
     # ----- the host's room -----
 
-    async def room(self, clip: dict) -> str | None:
+    async def room(self, clip: dict) -> Refused | None:
         host = self.spec.get("render_host")
         if host is None:  # not said: a renderer on this machine's loopback is taken to be on this machine
             host = "local" if re.match(r"https?://(127\.0\.0\.1|localhost|\[::1\])[:/]", self.spec.get("url", "http://127.0.0.1")) else "remote"
         if host == "local":
             need, free = float(self.spec.get("local_min_free_gb", 64)), free_gb()
             if free is None or free < need:
-                return (f"I won't make video on this machine while my voice models are on it: it has "
-                        f"{'unknown' if free is None else round(free)} gigabytes free and video needs {need:g}. "
-                        f"Set a render host in my profile.")
+                return Refused(f"I won't make video on this machine while my voice models are on it: it has "
+                               f"{'unknown' if free is None else round(free)} gigabytes free and video needs {need:g}. "
+                               f"Set a render host in my profile.", "There's no room on this machine to make video right now.")
         return await self.renderer.room(clip)
 
     # ----- runs -----
@@ -478,9 +490,17 @@ class VideoService:
                 self.task = asyncio.create_task(self.work())
 
     async def start(self, idea: str, mode: str = "single", count: int | None = None, seconds: float | None = None) -> dict:
+        try:
+            return await self._start(idea, mode, count, seconds)
+        except Refused as error:  # the whole reason goes to the panel; the voice says ``error.said``
+            self.notice = str(error)
+            self.changed()
+            raise
+
+    async def _start(self, idea: str, mode: str, count: int | None, seconds: float | None) -> dict:
         idea = re.sub(r"\s+", " ", (idea or "").strip())[:600]
         if not idea:
-            raise Refused("Tell me what the video should show.")
+            raise Refused("Tell me what the video should show.", "What should the video show?")
         if self.task and not self.task.done():
             raise Refused("A video is already being made. Say stop the video first.")
         mode = "continue" if mode == "continue" else "single"
@@ -490,7 +510,8 @@ class VideoService:
         refusal = await self.room({"prompt": idea, "seconds": seconds, "preset": self.spec.get("preset", "small"),
                                    "quality": self.spec.get("quality", "fh8")})
         if refusal:
-            raise Refused(refusal)
+            raise refusal if isinstance(refusal, Refused) else Refused(str(refusal), BUSY)
+        self.notice = None
         self.run = {"id": time.strftime("%m%d-%H%M%S-") + uuid.uuid4().hex[:4], "idea": idea, "mode": mode,
                     "count": count, "seconds": seconds, "state": "planning", "clips": [], "created": time.time(),
                     "renderer": self.renderer.name, "seed": int(self.spec.get("seed", 42))}
@@ -533,12 +554,13 @@ class VideoService:
         except asyncio.CancelledError:
             raise
         except Refused as error:
-            self.fail(run, str(error))
+            self.fail(run, str(error), error.said)
         except Exception as error:  # a bug or a host gone: said, the run kept for a retry
             self.fail(run, f"{type(error).__name__}: {str(error)[:160]}")
 
-    def fail(self, run: dict, message: str) -> None:
+    def fail(self, run: dict, message: str, said: str | None = None) -> None:
         run["state"], run["message"] = "failed", message
+        run["said"] = said or "Something went wrong. The panel has the details."
         self.live, self.still = {}, None
         self.save()
         self.changed()
@@ -619,7 +641,8 @@ class VideoService:
                     raise Refused("The render finished without a file.")
                 return got
             if got.state in ("failed", "cancelled"):
-                raise Refused(f"The render {got.state}" + (f": {str(got.error)[:160]}" if got.error else "."))
+                raise Refused(f"The render {got.state}" + (f": {str(got.error)[:160]}" if got.error else "."),
+                              f"The render {got.state}. The panel has the details.")
             self.live.update(at=got.at, of=got.of, stage=stage or got.stage or got.state, eta_s=got.eta_s, queued=got.state == "queued")
             if got.preview and got.preview != self.preview_ref:  # a new step preview from the engine
                 self.preview_ref = got.preview  # the renderer's own path: never sent to the page
@@ -681,69 +704,137 @@ class VideoService:
 
 # ---------------------------------------------------------------------------------------------------- the voice side
 
+# A request for a video, found in code before any model sees the turn: "generate a video of a dragon over a castle",
+# "can you make me a short film about ...", "make a video" (no subject: the agent asks what it should show), "show me a
+# clip of ...", "I want an endless video of ...". Not "I watched a video yesterday", "I made a video", "a video call".
 FILLER = (r"(?:\s+(?:me|us|a|an|the|this|that|my|your|our|another|new|short|quick|little|small|some|one|more|long|cool|"
-          r"funny|nice|beautiful|endless|infinite|continuous|never-ending|ai))")
-VIDEO = r"\s+(video|film|movie|clip)s?\b"
-START = re.compile(rf"\b(make|create|render|generate|shoot|start)\b{FILLER}{{0,3}}{VIDEO}")
+          r"funny|fun|nice|beautiful|epic|cinematic|endless|infinite|continuous|never-ending|ai|"
+          r"(?:\d+|one|two|three|five|ten|fifteen|twenty|thirty)[- ]second))")
+VIDEO = r"\s+(video|film|movie|clip|animation)s?\b(?!\s+(?:call|chat|game|camera|card|editor|player|stream)s?\b)"
+VERB = r"(?:make|create|render|generate|shoot|start|produce|animate|do|build|whip up|cook up|put together)"
+ASK = r"(?:show me|show us|i want|i'?d like|i would like|give me|get me|can i (?:get|have)|could i (?:get|have))"
+START = re.compile(rf"\b(?:{VERB}|{ASK})\b{FILLER}{{0,4}}{VIDEO}")
+# the person talking about their own video, not asking for one: "I'm going to make a video", "we were making a film"
+THEIRS = re.compile(r"\b(?:i|we)(?:'m| am|'re| are| was| were|'ve| have| had| used to| tried| will|'ll)(?:\s+[\w']+){0,2}\s*$")
+HOW_TO = re.compile(r"\bhow (?:do|does|did|would|should) (?:i|we|you|people|one|they)\b|\bhow to\b")
 STOP = re.compile(rf"\b(stop|cancel|end|halt|kill)\b(?:{FILLER}{{0,2}}{VIDEO}|\s+(the\s+)?render(ing)?\b)")
-SHOW = re.compile(rf"\b(show|play|watch|see)\b(?:\s+(?:me|us|the|my))*\s+(last|latest|newest|previous|recent|new)\s+(clip|video|shot)\b")
+SHOW = re.compile(r"\b(show|play|watch|see)\b(?:\s+(?:me|us|the|my))*\s+(last|latest|newest|previous|recent|new)\s+(clip|video|shot)\b"
+                  r"|\b(?:show|play)\b(?:\s+(?:me|us))?\s+(?:the|that|this|my)\s+(?:clip|video|film)\b(?:\s+(?:again|now|please))?\s*[.!?]*$")
 STATUS = re.compile(r"\b(how'?s|how is|status|progress|is .{0,20} done|how far|how long)\b.{0,30}\b(video|film|clip|render)\b")
 ENDLESS = re.compile(r"\b(keep going|endless(ly)?|infinite(ly)?|forever|continuous(ly)?|never[- ]ending|series of|story)\b")
 MORE = re.compile(r"\b(keep going|continue|another clip|next clip|more clips|go on)\b")
-ABOUT = re.compile(r"\b(?:of|about|showing|where|with|in which)\b\s+(.+)$")
+# what is left around the idea once the request is taken off: "make a video [of] a dragon [please]"
+LEAD = re.compile(r"^(?:[\s,.:;-]|\b(?:for (?:me|us)|please|now|right now|real quick|quickly)\b)*"
+                  r"(?:\b(?:of|about|showing|that shows|which shows|where|in which|with|featuring|depicting)\b\s*)?", re.I)
+TAIL = re.compile(r"(?:[\s,]*\b(?:please|for (?:me|us)|now|right now|boo|thanks|thank you|okay|ok)\b)*[\s.?!,]*$", re.I)
+# the answer to "What should the video show?": "um, a red kite over green hills", "how about a fox in the snow"
+REPLY_LEAD = re.compile(r"^(?:[\s,.]|\b(?:um+|uh+|er+|hmm+|okay|ok|so|well|maybe|let'?s say|how about|what about|"
+                        r"it should show|show|make it(?: about)?|it'?s|let'?s do|i want|i'?d like|a video of|one of|of|"
+                        r"about|boo)\b)*", re.I)
+NOTHING = {"", "it", "one", "something", "anything", "a video", "video", "videos", "a clip", "a film", "a movie",
+           "for me", "please", "now", "yes", "yeah", "sure"}
+NEVERMIND = re.compile(r"^\W*(?:no|nope|nah)\W*$|\b(never ?mind|forget (?:it|about it)|cancel|no thanks|nothing|don'?t bother|"
+                       r"not now|no video|skip it)\b")
+QUESTION = re.compile(r"^\W*(?:what|who|why|when|where|which|how|is|are|do|does|did|can you|could you|will you|tell me)\b"
+                      r"(?! about\b)")
+WAITS_S = 90  # how long "What should the video show?" waits for its answer
+
+
+def asked(low: str) -> re.Match | None:
+    """The request for a new video in these (lower-case) words, if they hold one."""
+    if HOW_TO.search(low):
+        return None
+    for found in START.finditer(low):
+        if not THEIRS.search(low[: found.start()]):
+            return found
+    return None
+
+
+def idea_in(words: str) -> str:
+    """The subject of the video from what follows the request ("of a dragon over a castle, please")."""
+    idea = TAIL.sub("", LEAD.sub("", words.strip(), count=1)).strip(" ,.?!\"'")
+    return "" if idea.lower() in NOTHING or len(idea) < 3 else idea
+
+
+def idea_said(words: str) -> str:
+    """The subject from the answer to "What should the video show?"."""
+    return idea_in(REPLY_LEAD.sub("", words.strip(), count=1))
 
 
 class VideoAgent:
     """The voice's handle on the video panel: "make a video of ...", "stop the video", "show me the last clip", "how's
-    the video going?". A back agent like the others (backstage.py), so the hand-over, the short "on it" line and the
-    report all work as they do for Hermes; it answers in a second, the clips come later."""
+    the video going?". Its requests are found in code (``wants``) before the front brain sees the turn, and it answers
+    that turn itself, in a second, with one short line (the server speaks it as the turn's only reply); the clips come
+    later. With no subject it asks "What should the video show?", and the next words are taken as the idea."""
 
     kind = "video"
     always = True
     ack = ("On it.", "Okay.", "On it, one moment.")
+    ASKING = "What should the video show?"
 
     def __init__(self, name: str, spec: dict, service: VideoService) -> None:
         self.name, self.label, self.service = name, spec.get("label", "Video"), service
+        self.asked_at: float | None = None  # when it asked what the video should show
+
+    def waiting(self) -> bool:
+        return self.asked_at is not None and time.monotonic() - self.asked_at < WAITS_S
 
     def wants(self, text: str) -> bool:
         low = text.lower()
         started = self.service.run is not None
-        return bool(START.search(low) or STOP.search(low) or SHOW.search(low)
-                    or (started and (STATUS.search(low) or (MORE.search(low) and "video" in low))))
+        if asked(low) or STOP.search(low) or SHOW.search(low):
+            return True
+        if started and (STATUS.search(low) or (MORE.search(low) and "video" in low)):
+            return True
+        # the answer to its question; a question of the person's own goes to the front brain as usual
+        return self.waiting() and not (QUESTION.search(low) and not NEVERMIND.search(low))
 
     async def run(self, prompt: str, progress: Callable[[str, str], None], confirm=None) -> str:
+        return (await self.handle(prompt, progress))[0]
+
+    async def handle(self, prompt: str, progress: Callable[[str, str], None]) -> tuple[str, str]:
+        """(what the voice says, the whole story for the page): the two differ only when a run is refused."""
         text = prompt.split("\n\n[Do it now", 1)[0].strip()
         low = text.lower()
         svc = self.service
+        waiting, self.asked_at = self.waiting(), None
         try:
             if STOP.search(low):
                 if not svc.run or svc.run["state"] in ("done", "stopped", "failed"):
-                    return "No video is being made right now."
+                    return ("No video is being made right now.",) * 2
                 await svc.stop()
-                return "Stopped the video."
-            if SHOW.search(low):
+                return ("Stopped the video.",) * 2
+            found = asked(low)
+            if SHOW.search(low) and not (found and idea_in(text[found.end():] if len(text) == len(low) else low[found.end():])):
                 clips = svc.snapshot()["clips"]
                 if not clips:
-                    return "There's no finished clip yet."
+                    return ("There's no finished clip yet.",) * 2
                 progress("video", json.dumps({"action": "show", "index": clips[-1]["index"]}))
-                return f"Here's clip {clips[-1]['index'] + 1}."
-            if STATUS.search(low) and not START.search(low):
-                return said_status(svc.snapshot())
-            idea = ABOUT.search(text)
-            idea = idea.group(1).strip(" .?!") if idea else re.sub(START, "", low).strip(" .?!")
-            idea = re.sub(r"^(boo|hey boo)[, ]+", "", idea, flags=re.I)
-            if MORE.search(low) and svc.run and not ABOUT.search(text):
+                return (f"Here's clip {clips[-1]['index'] + 1}.",) * 2
+            if STATUS.search(low) and not found:
+                return (said_status(svc.snapshot()),) * 2
+            if found:
+                idea = idea_in(text[found.end():] if len(text) == len(low) else low[found.end():])
+            elif waiting:
+                if NEVERMIND.search(low):
+                    return ("Okay, no video then.",) * 2
+                idea = idea_said(text)
+            else:
+                idea = ""
+            if not idea and MORE.search(low) and svc.run:
                 idea, mode = svc.run["idea"], "continue"
             else:
                 mode = "continue" if ENDLESS.search(low) else "single"
-            if len(idea) < 4:
-                return "What should the video show?"
+            if not idea:
+                self.asked_at = time.monotonic()
+                return (self.ASKING,) * 2
             progress("tool", "video_start")
             await svc.start(idea, mode)
-            return ("Starting the video. It keeps going, clip after clip, until you say stop." if mode == "continue"
+            said = ("Starting the video. It keeps going, clip after clip, until you say stop." if mode == "continue"
                     else "Starting the video. I'll tell you when the clip is ready.")
+            return said, f"{said} ({idea})"
         except Refused as error:
-            return str(error)
+            return error.said, str(error)
 
 
 def said_status(state: dict) -> str:
@@ -754,7 +845,7 @@ def said_status(state: dict) -> str:
     if state["state"] == "done":
         return f"The video is finished: {done} clip{'s' if done != 1 else ''}."
     if state["state"] in ("stopped", "failed"):
-        return f"The video {state['state']}" + (f": {state['message']}" if state.get("message") and state["state"] == "failed" else "") + "."
+        return f"The video {state['state']}."  # the reason is in the panel: too long and technical to speak
     head = f"Clip {now.get('index', done) + 1} is {state['state']}"
     if now.get("at") and now.get("of"):
         head += f", step {now['at']} of {now['of']}"
