@@ -72,6 +72,26 @@ below keeps its own licence.
 - **ddgs** (Dux Distributed Global Search, MIT) by deedy5: the web search behind quick live facts.
 - **wttr.in** by Igor Chubin (Apache-2.0), with data from WorldWeatherOnline: the weather lookup.
 
+## Video panel
+
+`voice_agent/video.py` and the page's video panel (docs/video-panel.md).
+
+- **Imagination Studio** by keys and Sam Wasserman
+  ([drowzeys/Imagination-Studio-by-keys-Wasserman](https://github.com/drowzeys/Imagination-Studio-by-keys-Wasserman)):
+  the default render host. Boo queues clips in its render queue through its own HTTP API, and follows their steps.
+- **MiniMax H3** by MiniMax (MiniMax H3 Community License), run by the Studio (FastH3 on a DGX Spark): the video
+  model behind the clips. Boo ships none of its weights. Powered by MiniMax H3.
+- **ComfyUI** by Comfy Org ([comfyanonymous/ComfyUI](https://github.com/comfyanonymous/ComfyUI), GPL-3.0), run by the
+  Studio on a DGX Spark. Its sampler's step progress drives the panel's live view. Boo talks only to the Studio, never
+  to ComfyUI.
+- **HyperFlow-Infinity** by Video Rebirth ([Video-Rebirth/hyperflow-infinity](https://github.com/Video-Rebirth/hyperflow-infinity),
+  Apache-2.0) and **Echo-Infinity** (Yuxuan Bian, Nan Duan, Qiang Xu et al., CUHK and Joy Future Academy, JD): the
+  idea behind continue mode, an endless film that plans its next clip from the story so far and checks itself. Only
+  the idea is used; no code from either is in this repository. The planned dense checks take their approach (many
+  small yes/no questions, decided in code) from Imagination Studio's AutoPilot.
+- **FFmpeg** (LGPL-2.1+/GPL, [ffmpeg.org](https://ffmpeg.org)): the posters and the joined film, used if it is
+  installed. It is not shipped here.
+
 ## Earlier versions
 
 Earlier versions captioned with Qwen3.5-0.8B (Qwen team, Alibaba Cloud, Apache-2.0) and answered camera questions with

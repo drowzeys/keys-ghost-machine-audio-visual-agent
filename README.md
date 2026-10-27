@@ -446,6 +446,26 @@ take itself: after 3 s under −30 dBFS it drops the quiet tail and asks for the
   10 or 30 seconds, or every 1, 5 or 15 minutes.
 - **Memory**: how long captions are kept: 1, 2 (default), 3 or 5 days, or 1 week.
 
+## Video panel
+
+The page has three columns: your camera on the left (a local preview only, never recorded or used in a video), Boo
+in the middle, and a **video panel** on the right. On a phone they stack, with Boo first. Both side panels fold away.
+
+The video panel makes clips with a render host, by default an
+[Imagination Studio](https://github.com/drowzeys/Imagination-Studio-by-keys-Wasserman) render queue on another
+machine. You can use the panel's Start and Stop buttons, or ask by voice: "Boo, make a video of a lighthouse in a
+storm", "make an endless video of waves", "stop the video", "show me the last clip".
+
+While a clip renders, the panel shows it live. Today's Studio reports the sampler's steps but sends no pictures, so the
+live view is labelled "progress only". When the clip is done, it plays (muted unless you turn sound on, and always quiet
+while Boo listens or speaks), and the next clip's render follows. "Keep going" plans each next clip with Bolt from the
+story so far, and opens it on the last clip's final frame. The film downloads as one file. Runs are checkpointed clip by
+clip, so a restart resumes where it stopped.
+
+A profile turns it on with a `video` section. A run is refused when the render host would be the machine running the
+voice models and that machine lacks room. The full design, including what the engines expose for live previews and the
+plan for the infinity engine, is in [docs/video-panel.md](docs/video-panel.md).
+
 ## Prebuilt builds
 
 The [v0.3.0 release](https://github.com/drowzeys/keys-ghost-machine-audio-visual-agent/releases/tag/v0.3.0) has
@@ -541,6 +561,8 @@ A profile names each engine and the turn timing:
 - `turn`: VAD timing (`eager_silence_ms` starts work early, `end_silence_ms` confirms the end of a turn).
 - `eyes`: the camera model; `memory`: Eyes of Kai's URL, the captioner and `interval_s`.
 - `agents` and `agent`: the back agents and the default one.
+- `video` (optional): the video panel's render host (`renderer`, `url`, `render_host`), clip settings (`preset`,
+  `quality`, `seconds`, `max_clips`) and spoken updates ([docs/video-panel.md](docs/video-panel.md#profile)).
 
 ## Limitations
 
@@ -596,6 +618,11 @@ The code is MIT (LICENSE). Everything below keeps its own licence.
 | Silero VAD v5 | Hears when someone is speaking (`silero_vad.onnx` ships here) | Silero | MIT | [GitHub](https://github.com/snakers4/silero-vad) |
 | MediaPipe Face Detector and Hand Landmarker | Gaze tracking, exact finger counts and which hand, in the page | Google | Apache-2.0 | [GitHub](https://github.com/google-ai-edge/mediapipe) |
 | Three.js | Boo, the 3D ghost | three.js authors (mrdoob) | MIT | [GitHub](https://github.com/mrdoob/three.js) |
+| Imagination Studio | Renders the video panel's clips through its render queue (the default render host) | keys and Sam Wasserman | see repository | [GitHub](https://github.com/drowzeys/Imagination-Studio-by-keys-Wasserman) |
+| MiniMax H3 (FastH3 on a DGX Spark) | The video model behind the Studio's clips; Boo ships no weights | MiniMax | MiniMax H3 Community License | — |
+| ComfyUI | Runs the Studio's video jobs on a DGX Spark (its step progress drives the live view) | Comfy Org | GPL-3.0 | [GitHub](https://github.com/comfyanonymous/ComfyUI) |
+| HyperFlow-Infinity and Echo-Infinity | The idea behind the panel's continue mode: an open-ended film that plans its next clip and checks itself; only the idea is used, no code | Video Rebirth; Yuxuan Bian, Nan Duan, Qiang Xu et al. | Apache-2.0 (HyperFlow-Infinity) | [GitHub](https://github.com/Video-Rebirth/hyperflow-infinity) |
+| FFmpeg | The video panel's posters and the joined film (used if installed, not shipped) | FFmpeg developers | LGPL-2.1+ / GPL | [ffmpeg.org](https://ffmpeg.org) |
 | ddgs | Web search for quick live facts | deedy5 | MIT | [GitHub](https://github.com/deedy5/ddgs) |
 | wttr.in | Weather for quick live facts (data from WorldWeatherOnline) | Igor Chubin | Apache-2.0 | [GitHub](https://github.com/chubin/wttr.in) |
 | NVIDIA PyTorch container | The Docker image's base (`nvcr.io/nvidia/pytorch:26.07-py3`) | NVIDIA | NVIDIA Deep Learning Container License | [NGC](https://catalog.ngc.nvidia.com/orgs/nvidia/containers/pytorch) |

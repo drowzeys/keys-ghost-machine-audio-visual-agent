@@ -18,7 +18,8 @@
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { overflow-x: hidden; }
   body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; min-height: 100vh; }
-  main { max-width: 860px; margin: 0 auto; padding: max(14px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) calc(190px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
+  main { max-width: 1360px; margin: 0 auto; padding: max(14px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) calc(190px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
+  main > :not(#deck) { max-width: 860px; margin-left: auto; margin-right: auto; }
   header { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
   h1 { font: 700 15px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .32em; margin: 0; color: var(--accent);
        text-shadow: 0 0 18px color-mix(in srgb, var(--accent) 55%, transparent); }
@@ -28,7 +29,7 @@
   #chip::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: currentColor; margin-right: 7px; vertical-align: 1px; box-shadow: 0 0 8px currentColor; }
 
   /* the pod: Boo lives in a dark holographic stage in both themes; with the camera on, the width is shared */
-  #stage { position: relative; display: flex; gap: 10px; align-items: stretch; height: min(50vh, 460px); min-height: 260px; padding: 10px;
+  #stage { position: relative; display: flex; gap: 10px; align-items: stretch; height: min(50vh, 460px); min-height: 260px; padding: 10px; min-width: 0;
            border-radius: 22px; border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line));
            background: radial-gradient(ellipse at 50% 38%, var(--pod1), var(--pod2) 72%);
            box-shadow: 0 0 0 1px rgba(255,255,255,.02) inset, 0 18px 50px -24px color-mix(in srgb, var(--accent) 70%, transparent); overflow: hidden; }
@@ -40,10 +41,82 @@
   #fallback div { width: 42%; aspect-ratio: 1; max-width: 220px; border-radius: 50% 50% 42% 42%; background: radial-gradient(circle at 40% 35%, #d7b6ff, #7b3cf0 60%, #2b0f55);
                   box-shadow: 0 0 60px #9b5cff; animation: hover 3s ease-in-out infinite; }
   @keyframes hover { 50% { transform: translateY(-8px); } }
-  #selfview { flex: 1 1 0; min-width: 0; height: 100%; object-fit: cover; transform: scaleX(-1); border-radius: 14px;
-              border: 1px solid color-mix(in srgb, var(--accent2) 45%, transparent); box-shadow: 0 0 26px -6px color-mix(in srgb, var(--accent2) 60%, transparent);
-              background: #000; display: none; }
+  /* the deck: the person's camera on the left, Boo in the middle (always the largest), the video panel on the right;
+     on a phone Boo comes first and the two panels follow, one under the other */
+  #deck { display: flex; flex-direction: column; gap: 10px; }
+  .side { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-radius: 18px; background: var(--panel); border: 1px solid var(--line); overflow: hidden; }
+  .sidehead { display: flex; align-items: center; gap: 8px; padding: 7px 8px 7px 12px; min-height: 40px; font: 600 10px/1 ui-monospace, monospace; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+  .sidehead .ttl { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sidehead button { padding: 5px 8px; font-size: 12px; border-radius: 10px; flex: none; }
+  .sidehead button svg { width: 15px; height: 15px; }
+  .side .body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 8px; padding: 0 8px 8px; }
+  .side.folded .body { display: none; }
+  .fold svg { transition: transform .2s; }
+  .side.folded .fold svg { transform: rotate(180deg); }
+  #camBox { position: relative; aspect-ratio: 4 / 3; max-height: 240px; border-radius: 12px; overflow: hidden; background: #000;
+            border: 1px solid color-mix(in srgb, var(--accent2) 45%, transparent); box-shadow: 0 0 26px -6px color-mix(in srgb, var(--accent2) 60%, transparent); }
+  #selfview { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); display: none; background: #000; }
   #selfview.on { display: block; }
+  #camOff { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; color: #8d84a8; font: 11px/1.4 ui-monospace, monospace; text-align: center; padding: 8px; }
+  #camCol.live #camOff { display: none; }
+  #camCol:not(.live) #camBox { aspect-ratio: auto; height: 64px; border-style: dashed; box-shadow: none; }
+  .camnote { color: var(--muted); font: 10px/1.3 ui-monospace, monospace; }
+
+  /* the video panel: the clip or its live render on top, the beat, the strip of recent clips, the controls */
+  #vView { position: relative; aspect-ratio: 16 / 9; border-radius: 12px; overflow: hidden; background: #05030a; border: 1px solid color-mix(in srgb, var(--gold) 35%, var(--line)); flex: none; }
+  #vView video, #vView canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: none; background: #05030a; }
+  #vView.clip #vMain, #vView.live #vLive { display: block; }
+  #vInset { position: absolute; right: 6px; bottom: 6px; width: 34%; aspect-ratio: 16 / 9; border-radius: 8px; overflow: hidden; display: none; border: 1px solid rgba(255,255,255,.25); box-shadow: 0 4px 16px rgba(0,0,0,.5); cursor: pointer; }
+  #vInset video { position: static; display: block; width: 100%; height: 100%; object-fit: cover; }
+  #vView.live.inset #vInset { display: block; }
+  #vOver { position: absolute; left: 6px; top: 6px; right: 6px; display: flex; gap: 6px; flex-wrap: wrap; pointer-events: none; }
+  #vOver span:empty { display: none; }
+  #vEmpty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 14px; color: #8d84a8; font: 12px/1.5 system-ui, sans-serif; }
+  #vView.clip #vEmpty, #vView.live #vEmpty { display: none; }
+  #vBar { position: absolute; left: 0; bottom: 0; height: 3px; width: 0; background: var(--gold); box-shadow: 0 0 10px var(--gold); transition: width .4s; }
+  .vstat { font: 600 10px/1 ui-monospace, monospace; letter-spacing: .1em; padding: 5px 8px; border-radius: 999px; color: var(--gold); border: 1px solid color-mix(in srgb, var(--gold) 45%, transparent); white-space: nowrap; text-transform: none; }
+  #vBeat { color: var(--fg); font-size: 13px; line-height: 1.4; min-height: 1.4em; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  #vBeat b { color: var(--gold); font: 700 10px/1 ui-monospace, monospace; letter-spacing: .12em; text-transform: uppercase; margin-right: 6px; }
+  #vStrip { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: thin; min-height: 0; flex: none; }
+  #vStrip:empty { display: none; }
+  #vStrip button { padding: 0; border-radius: 8px; overflow: hidden; flex: none; width: 76px; aspect-ratio: 16 / 9; position: relative; background: #05030a; }
+  #vStrip button.on { border-color: var(--gold); box-shadow: 0 0 0 1px var(--gold); }
+  #vStrip img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  #vStrip span { position: absolute; left: 4px; bottom: 3px; font: 700 10px/1 ui-monospace, monospace; color: #fff; text-shadow: 0 1px 3px #000; }
+  #vForm { display: flex; gap: 6px; flex-wrap: wrap; }
+  #vIdea { flex: 1 1 140px; padding: 8px 12px; font-size: 16px; border-radius: 12px; }
+  #vMode { flex: 0 1 auto; min-width: 0; padding: 7px 8px; font-size: 14px; }
+  .vbtns { display: flex; gap: 6px; flex-wrap: wrap; }
+  .vbtns button, .vbtns a { padding: 8px 12px; font-size: 13px; }
+  .vbtns a { font: inherit; font-size: 13px; padding: 8px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); text-decoration: none; }
+  .vbtns a[aria-disabled="true"] { opacity: .45; pointer-events: none; }
+  #vStart { border-color: var(--gold); color: var(--gold); }
+  .vbtns button:disabled { opacity: .45; cursor: default; }
+  #vMsg { color: var(--muted); font: 11px/1.4 ui-monospace, monospace; min-height: 1.4em; overflow-wrap: anywhere; }
+
+  /* desktop, and a tablet held sideways: three columns, Boo in the middle and widest */
+  @media (min-width: 900px), (min-width: 700px) and (orientation: landscape) {
+    #deck { display: grid; grid-template-columns: var(--camw, 48px) minmax(0, 1fr) var(--vidw, 48px); gap: 12px; height: min(60vh, 580px); min-height: 340px; }
+    #deck #stage { height: 100%; order: 0; }
+    #deck { --camw: clamp(190px, 21vw, 300px); --vidw: clamp(270px, 29vw, 420px); }
+    #deck.camfold, #deck.camoff { --camw: 48px; }
+    #deck.camoff #camCol .body { display: none; }
+    #deck.camoff #camCol .sidehead { flex-direction: column; padding: 10px 6px; height: 100%; }
+    #deck.camoff #camCol .sidehead .ttl { writing-mode: vertical-rl; transform: rotate(180deg); overflow: visible; }
+    #deck.camoff #camCol .fold { display: none; }
+    #deck.camoff #camCol .ttl::after { content: " off"; }
+    #deck.vidfold { --vidw: 48px; }
+    .side.folded .sidehead { flex-direction: column; padding: 10px 6px; height: 100%; }
+    .side.folded .sidehead .ttl { writing-mode: vertical-rl; transform: rotate(180deg); overflow: visible; }
+    .side.folded .sidehead .vstat, .side.folded .sidehead #vMute { display: none; }
+    #camBox { max-height: none; flex: 1 1 auto; aspect-ratio: auto; min-height: 120px; }
+    #vView { aspect-ratio: auto; flex: 1 1 auto; min-height: 120px; }
+    .side .body { overflow-y: auto; scrollbar-width: thin; }
+  }
+  @media (max-width: 899px) and (orientation: portrait), (max-width: 699px) {
+    #stage { order: -1; }
+    #camBox { max-height: 200px; margin: 0 auto; }
+  }
   #hud { position: absolute; left: 6px; top: 4px; z-index: 2; display: flex; gap: 6px; flex-wrap: wrap; max-width: 90%; pointer-events: none; }
   .tag { font: 600 10px/1 ui-monospace, monospace; letter-spacing: .14em; text-transform: uppercase; padding: 6px 9px; border-radius: 999px;
          color: #e9dcff; background: rgba(24, 12, 44, .72); border: 1px solid rgba(180, 124, 255, .45); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); animation: pop .25s ease-out; }
@@ -110,6 +183,7 @@
   input { flex: 1 1 200px; min-width: 0; font: inherit; font-size: 16px; padding: 10px 14px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); }
   #state { color: var(--muted); font: 11px/1 ui-monospace, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 38%; }
   @media (max-width: 520px) { .lbl { display: none; } #mic .lbl { display: inline; } #state { display: none; } #stage { height: min(46vh, 420px); } }
+  @media (prefers-reduced-motion: reduce) { #vBar { transition: none; } }
 </style>
 </head>
 <body>
@@ -119,9 +193,40 @@
     <span class="sub" id="sub">Parakeet · Nemotron 3.5 Bolt · Drama 3 on TensorFold</span>
     <span id="chip">offline</span>
   </header>
-  <div id="stage">
-    <div id="boo"><div id="fallback"><div></div></div><div id="hud"></div></div>
-    <video id="selfview" playsinline muted></video>
+  <div id="deck" class="camoff">
+    <section class="side" id="camCol" aria-label="Your camera">
+      <div class="sidehead"><span class="ttl">Camera</span>
+        <button class="fold" id="camFold" aria-label="Fold the camera panel" aria-expanded="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 6l-6 6 6 6"/></svg></button></div>
+      <div class="body">
+        <div id="camBox"><video id="selfview" playsinline muted></video><div id="camOff">camera off<span class="camnote">tap Camera below to turn it on</span></div></div>
+        <div class="camnote">A local preview for Boo's eyes only: never recorded, never used in a video.</div>
+      </div>
+    </section>
+    <div id="stage">
+      <div id="boo"><div id="fallback"><div></div></div><div id="hud"></div></div>
+    </div>
+    <section class="side" id="vidCol" aria-label="Video">
+      <div class="sidehead"><span class="ttl">Video</span><span class="vstat" id="vStatus">idle</span>
+        <button id="vMute" aria-label="Video sound" aria-pressed="false" title="Video sound (it stays quiet while Boo listens or speaks)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M4 9h4l5-4v14l-5-4H4z"/><path id="vMuteX" d="M17 9l5 6M22 9l-5 6"/></svg></button>
+        <button class="fold" id="vidFold" aria-label="Fold the video panel" aria-expanded="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg></button></div>
+      <div class="body">
+        <div id="vView">
+          <video id="vMain" playsinline muted preload="none"></video>
+          <canvas id="vLive" width="320" height="180" aria-label="The clip as it renders"></canvas>
+          <div id="vInset" title="The clip just made"><video id="vInsetVid" playsinline muted loop preload="none"></video></div>
+          <div id="vOver"><span class="tag" id="vBadge"></span><span class="tag look" id="vStep"></span></div>
+          <div id="vEmpty">Say “make a video of …”, or type an idea below.</div>
+          <div id="vBar"></div>
+        </div>
+        <div id="vBeat"></div>
+        <div id="vStrip" aria-label="Recent clips"></div>
+        <form id="vForm" autocomplete="off"><input id="vIdea" placeholder="a lighthouse in a storm…" aria-label="Video idea" enterkeyhint="go">
+          <select id="vMode" aria-label="How many clips"><option value="single">one clip</option><option value="continue">keep going</option></select></form>
+        <div class="vbtns"><button id="vStart" type="button">Start</button><button id="vStop" type="button">Stop</button>
+          <a id="vFilm" href="#" download aria-disabled="true">Download film</a></div>
+        <div id="vMsg" aria-live="polite"></div>
+      </div>
+    </section>
   </div>
   <div id="pickers">
     <div class="pick on" id="namePick" title="What the assistant is called; it answers to this name"><span>Name</span><input id="nameIn" maxlength="24" value="Boo" autocomplete="off" spellcheck="false" aria-label="Assistant name"></div>
@@ -181,7 +286,7 @@ function setEmotion(e, holdMs) {
 
 let state = "idle", stateAt = 0, endPending = false;
 const LABEL = { idle: "standby", listening: "listening", thinking: "thinking", speaking: "speaking", interrupted: "interrupted" };
-function setState(s) { state = s; stateAt = performance.now(); $("chip").textContent = LABEL[s] || s; if (s === "interrupted") blinkAt = performance.now(); }
+function setState(s) { state = s; stateAt = performance.now(); $("chip").textContent = LABEL[s] || s; if (s === "interrupted") blinkAt = performance.now(); videoSound(); }
 
 let gaze = { x: 0, y: 0 }, gazeTarget = { x: 0, y: 0 }, nextWander = 0, blinkAt = performance.now() + 2500, micLevel = 0, speakLevel = 0;
 let tracker = null, trackerLoading = null, lastDetect = 0, lastFaceAt = -1e9, facePresent = false, faceGaze = null;
@@ -327,6 +432,7 @@ function connect() {
     if (e.type === "confirm") confirmCard(e);
     if (e.type === "error") { line("meta", "error: " + e.error); const back = emotion; setEmotion("concerned"); emoTimer = setTimeout(() => setEmotion(back), 2500); if (state === "thinking") setState("idle"); }
     if (e.type === "metrics") metrics(e);
+    if (e.type === "video" && e.action === "show") showClip(e.index, true);
   };
   ws.onclose = () => { $("state").textContent = "disconnected — reconnecting…"; $("chip").textContent = "offline"; setTimeout(connect, 1500); };
 }
@@ -455,12 +561,12 @@ $("cam").onclick = async () => {
   const v = $("selfview");
   if (camStream) {
     camStream.getVideoTracks().forEach((t) => t.stop()); camStream = null; clearInterval(frameTimer);
-    v.classList.remove("on"); v.srcObject = null; $("cam").classList.remove("on"); faceGaze = null; presence(false);
+    v.classList.remove("on"); v.srcObject = null; $("cam").classList.remove("on"); $("camCol").classList.remove("live"); $("deck").classList.add("camoff"); faceGaze = null; presence(false);
     hands([]); healAudio(); healMic(); return;
   }
   try { camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } } }); }
   catch (err) { line("meta", "camera unavailable: " + err.message); healMic(); return; }
-  v.srcObject = camStream; await v.play().catch(() => {}); v.classList.add("on"); $("cam").classList.add("on");
+  v.srcObject = camStream; await v.play().catch(() => {}); v.classList.add("on"); $("cam").classList.add("on"); $("camCol").classList.add("live"); $("deck").classList.remove("camoff");
   healAudio(); healMic();
   frameTimer = setInterval(sendFrame, 1000);
   if (!trackerLoading) trackerLoading = loadTracker().then((t) => (tracker = t)).catch((err) => { line("meta", "face tracking unavailable: " + err.message); });
@@ -784,6 +890,162 @@ function frame(now) {
   b.renderer.render(b.scene, b.camera);
 }
 requestAnimationFrame(frame);
+
+
+// ---------- the video panel: the clip as it renders, then as it plays; a strip of recent clips; start, stop, film ----------
+// The panel listens only while it is open and the page is visible (one event stream, a few small updates a second).
+// The engine's step count drives the live view; a real step picture is shown when the renderer gives one ("engine"),
+// otherwise the clip's opening still or noise sharpens with the steps, marked "progress only".
+let vState = { state: "idle", clips: [] }, vSource = null, vPoll = null, vErrors = 0, vSeq = "", vStill = null, vShown = null;
+let vSoundWanted = false, vHold = false, vOff = false;  // vHold: a clip picked by hand or just finished plays through before the live view returns
+const vCtx = $("vLive").getContext("2d", { alpha: false });
+const vNoise = document.createElement("canvas"); vNoise.width = 160; vNoise.height = 90;
+const WORKING = new Set(["planning", "keyframe", "rendering", "checking"]);
+
+function videoSound() {  // sound only when asked for and while Boo is neither listening, thinking nor speaking
+  const quiet = !vSoundWanted || ["listening", "thinking", "speaking"].includes(state);
+  $("vMain").muted = quiet;
+  $("vMuteX").style.display = vSoundWanted ? "none" : "";
+}
+$("vMute").onclick = () => { vSoundWanted = !vSoundWanted; $("vMute").setAttribute("aria-pressed", String(vSoundWanted)); videoSound(); };
+
+function fold(col, flag, key) {
+  const folded = $(col).classList.toggle("folded", flag);
+  $("deck").classList.toggle(col === "camCol" ? "camfold" : "vidfold", folded);
+  $(col).querySelector(".fold").setAttribute("aria-expanded", String(!folded));
+  store.set(key, folded ? "1" : "0");
+  if (col === "vidCol") videoListen();
+}
+$("camFold").onclick = () => fold("camCol", !$("camCol").classList.contains("folded"), "boo.fold.cam");
+$("vidFold").onclick = () => fold("vidCol", !$("vidCol").classList.contains("folded"), "boo.fold.video");
+fold("camCol", store.get("boo.fold.cam") === "1", "boo.fold.cam");
+fold("vidCol", store.get("boo.fold.video") === "1", "boo.fold.video");
+
+function videoListen() {
+  const want = !vOff && !$("vidCol").classList.contains("folded") && !document.hidden;
+  if (!want) { if (vSource) { vSource.close(); vSource = null; } clearInterval(vPoll); vPoll = null; return; }
+  if (vSource || vPoll) return;
+  if (window.EventSource && vErrors < 3) {
+    vSource = new EventSource("/api/video/events");
+    vSource.onmessage = (m) => { vErrors = 0; try { videoUpdate(JSON.parse(m.data)); } catch (_) {} };
+    vSource.onerror = () => { vErrors++; if (vErrors >= 3 && vSource) { vSource.close(); vSource = null; videoListen(); } };
+  } else {  // no event stream (a proxy that buffers it): ask every two seconds
+    const ask = () => fetch("/api/video/status").then((r) => r.json()).then(videoUpdate).catch(() => {});
+    ask(); vPoll = setInterval(ask, 2000);
+  }
+}
+document.addEventListener("visibilitychange", videoListen);
+
+function stepText(c) {
+  if (!c) return "";
+  if (c.queued) return "queued";
+  if (c.at != null && c.of) return "step " + c.at + "/" + c.of + (c.eta_s != null ? " · ~" + Math.max(1, Math.round(c.eta_s)) + " s" : "");
+  return c.stage || "";
+}
+function videoUpdate(st) {
+  const before = vState; vState = st;
+  if (st.state === "off") { vOff = true; $("vidCol").hidden = true; $("deck").style.setProperty("--vidw", "0px"); videoListen(); return; }
+  const c = st.current;
+  const pct = c && c.at != null && c.of ? Math.round(100 * c.at / c.of) : null;
+  $("vStatus").textContent = st.state === "rendering" ? "rendering" + (pct != null ? " " + pct + "%" : "") : st.state;
+  $("vBar").style.width = WORKING.has(st.state) && pct != null ? pct + "%" : "0";
+  $("vStep").textContent = WORKING.has(st.state) ? (st.state === "rendering" ? stepText(c) : st.state === "checking" ? "checking" : st.state) : "";
+  $("vBadge").textContent = WORKING.has(st.state) ? (c && c.preview === "engine" ? "live preview" : "progress only") : "";
+  const beat = c ? c : (st.clips.length ? st.clips[st.clips.length - 1] : null);
+  $("vBeat").innerHTML = "";
+  if (beat) { const b = document.createElement("b"); b.textContent = "clip " + (beat.index + 1); $("vBeat").append(b, document.createTextNode(beat.prompt || beat.beat || "")); $("vBeat").title = beat.prompt || ""; }
+  $("vMsg").textContent = st.message ? st.message : (st.run ? (st.mode === "continue" ? "keeps going until stopped" + (st.count ? " (at most " + st.count + " clips)" : "") : "one clip") : "");
+  $("vStop").disabled = !WORKING.has(st.state);
+  $("vStart").disabled = WORKING.has(st.state);
+  const film = $("vFilm");
+  if (st.film) { film.href = st.film; film.setAttribute("aria-disabled", "false"); } else { film.removeAttribute("href"); film.setAttribute("aria-disabled", "true"); }
+  // the strip: newest last, at most twelve
+  const strip = $("vStrip"), have = new Set([...strip.children].map((x) => x.dataset.key));
+  const keep = st.clips.slice(-12);
+  if (keep.some((k) => !have.has(st.run + ":" + k.index)) || strip.children.length !== keep.length) {
+    strip.textContent = "";
+    for (const k of keep) {
+      const b = document.createElement("button"); b.type = "button"; b.dataset.key = st.run + ":" + k.index; b.title = k.prompt || "";
+      b.setAttribute("aria-label", "Play clip " + (k.index + 1));
+      if (k.poster) { const i = document.createElement("img"); i.loading = "lazy"; i.alt = ""; i.src = k.poster; b.append(i); }
+      const n = document.createElement("span"); n.textContent = k.index + 1; b.append(n);
+      b.onclick = () => showClip(k.index, true); strip.append(b);
+    }
+    strip.scrollLeft = strip.scrollWidth;
+  }
+  // a clip that just finished takes the main view and plays; the next one's render follows when it has played through
+  const newest = st.clips.length ? st.clips[st.clips.length - 1] : null;
+  const fresh = newest && (!before.clips || !before.clips.some((k) => k.index === newest.index) || before.run !== st.run);
+  if (fresh && before.run !== undefined) showClip(newest.index, true);
+  else if (!vHold) videoView();
+  // the picture behind the live view: fetched again for each new clip, and for each new picture of the same clip
+  const key = c ? [st.run, c.index, c.seq, c.preview].join(":") : "";
+  if (key !== vSeq) { vSeq = key; vStill = null; if (c) loadStill(); }
+}
+function loadStill() {
+  if (!vState.current || vState.current.preview === "noise") { vStill = null; return; }
+  const img = new Image(); img.decoding = "async";
+  img.onload = () => { vStill = img; }; img.onerror = () => { vStill = null; };
+  img.src = "/api/video/preview.jpg?k=" + encodeURIComponent(vSeq);
+}
+function videoView() {  // live while a clip renders (the last clip small in the corner), else the newest clip on a loop
+  const view = $("vView"), working = WORKING.has(vState.state), last = vState.clips.length ? vState.clips[vState.clips.length - 1] : null;
+  if (working) {
+    view.className = "live" + (last ? " inset" : "");
+    if (last) { const iv = $("vInsetVid"); if (iv.dataset.src !== last.url) { iv.dataset.src = last.url; iv.src = last.url; iv.play().catch(() => {}); } }
+    const m = $("vMain"); if (!m.paused) m.pause();
+  } else if (last) { if (vShown !== last.index || view.className !== "clip") showClip(last.index, false); }
+  else view.className = "";
+}
+function showClip(index, hold) {
+  const k = vState.clips.find((x) => x.index === index); if (!k) return;
+  if ($("vidCol").classList.contains("folded")) fold("vidCol", false, "boo.fold.video");
+  const m = $("vMain"); vShown = index; vHold = hold && WORKING.has(vState.state);
+  m.loop = !vHold;  // held: plays through once, then the live view comes back
+  if (m.dataset.src !== k.url) { m.dataset.src = k.url; m.src = k.url; }
+  videoSound(); m.currentTime = 0; m.play().catch(() => {});
+  $("vView").className = "clip";
+  for (const b of $("vStrip").children) b.classList.toggle("on", b.dataset.key === vState.run + ":" + index);
+}
+$("vMain").onended = () => { if (vHold) { vHold = false; videoView(); } };
+$("vInset").onclick = () => { const last = vState.clips[vState.clips.length - 1]; if (last) showClip(last.index, true); };
+
+// the live view: ~4 frames a second, only while it is on screen
+let vT = 0;
+function drawLive() {
+  const c = vState.current, w = 320, h = 180, g = vCtx;
+  const p = c && c.at != null && c.of ? c.at / c.of : vState.state === "checking" ? 1 : 0;
+  if (c && c.preview === "engine" && vStill) { g.filter = "none"; g.drawImage(vStill, 0, 0, w, h); return; }
+  // noise, finer and fainter as the steps go by
+  const n = vNoise.getContext("2d"), d = n.createImageData(160, 90), hue = vT * 7;
+  for (let i = 0; i < d.data.length; i += 4) {
+    const v = Math.random() * 255;
+    d.data[i] = v * (0.55 + 0.45 * Math.sin(hue + i)); d.data[i + 1] = v * 0.45; d.data[i + 2] = v * 0.85; d.data[i + 3] = 255;
+  }
+  n.putImageData(d, 0, 0);
+  g.filter = "none"; g.fillStyle = "#05030a"; g.fillRect(0, 0, w, h);
+  if (vStill) { g.filter = "blur(" + ((1 - p) * 9).toFixed(1) + "px) saturate(" + (0.4 + 0.6 * p).toFixed(2) + ")"; g.drawImage(vStill, 0, 0, w, h); g.filter = "none"; }
+  g.globalAlpha = vStill ? 0.75 * (1 - p) + 0.04 : 0.9 - 0.5 * p;
+  g.imageSmoothingEnabled = p > 0.5; g.drawImage(vNoise, 0, 0, w, h); g.globalAlpha = 1;
+  vT++;
+}
+setInterval(() => { if (!document.hidden && $("vView").classList.contains("live") && !$("vidCol").classList.contains("folded")) drawLive(); }, 250);
+
+async function videoCall(path, body) {
+  try {
+    const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
+    const out = await r.json().catch(() => ({}));
+    if (!r.ok) { $("vMsg").textContent = out.error || "the video service said no"; return; }
+    videoUpdate(out);
+  } catch (err) { $("vMsg").textContent = "can't reach the video service: " + err.message; }
+}
+$("vStart").onclick = () => { const idea = $("vIdea").value.trim(); if (!idea) { $("vIdea").focus(); return; } videoCall("/api/video/start", { prompt: idea, mode: $("vMode").value }); };
+$("vForm").onsubmit = (e) => { e.preventDefault(); $("vStart").click(); };
+$("vStop").onclick = () => videoCall("/api/video/stop");
+{ const m = store.get("boo.video.mode"); if (m === "single" || m === "continue") $("vMode").value = m; }
+$("vMode").onchange = () => store.set("boo.video.mode", $("vMode").value);
+videoSound();
+videoListen();
 
 // dev row: "?" previews each mood and state
 for (const e of Object.keys(EMO)) { const b = document.createElement("button"); b.textContent = e; b.onclick = () => setEmotion(e); $("dev").append(b); }
