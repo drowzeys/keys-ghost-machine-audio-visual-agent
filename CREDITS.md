@@ -56,6 +56,11 @@ below keeps its own licence.
   beside the agent with one small addition, `patches/eyes-of-kai-retention.patch` (set how many days it keeps while
   running). `voice_agent/memory.py` follows its question-about-the-past pattern, its caption prompt and its labelled
   prompt layout.
+- **EmbeddingGemma-2** by [Google DeepMind](https://huggingface.co/google/embeddinggemma-2): the optional memory search
+  by meaning (`voice_agent/recall.py`), embedding captions and conversation lines. Its model card states Apache-2.0
+  (the card's licence link points at the Gemma 4 licence page, labelled Apache 2.0; the repository ships no LICENSE
+  file), and says deployments must follow the Gemma Prohibited Use Policy. Its task prefixes (`task: search result |
+  query:`, `title: none | text:`) are the card's. On the DGX Spark it runs on TensorFold's CUDA engine.
 - **MediaPipe** Face Detector and Hand Landmarker by Google (Apache-2.0): face tracking for the ghost's gaze, and exact
   finger counts and which hand, in the page.
 - **Three.js** (MIT): Boo, the 3D ghost.

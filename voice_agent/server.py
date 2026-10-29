@@ -31,7 +31,7 @@ from fastapi.responses import FileResponse, JSONResponse
 
 from .engines import SIDES, SAMPLE_RATE, Brain, Clock, Said, sides, Recognizer, Vad, Voice, cancel, jpeg_to_png, sentences, unrepeated, wants_eyes
 from .memory import Memory, with_context
-from . import backstage, lookup
+from . import backstage, lookup, recall
 
 HERE = Path(__file__).resolve().parent
 LOGGED = {"transcript", "reply", "deep", "task", "confirm", "error", "metrics", "emotion", "repeat"}
@@ -141,6 +141,10 @@ class Engines:
         self.eyes = Brain({**profile["brain"], **profile["eyes"]}) if profile.get("eyes") else None
         # Eyes of Kai: captions every camera frame into a timestamped log the brain can look back through
         self.memory = Memory(profile["memory"]) if profile.get("memory") else None
+        # memory search by meaning (optional): captions and conversation lines embedded by an /v1/embeddings server
+        self.recall = recall.Recall(profile["memory_search"]) if profile.get("memory_search") else None
+        if self.memory:
+            self.memory.recall = self.recall
         # the back agents a turn is handed to when the front brain tags it [deep]: a direct model (Redsnow 5.3) or an
         # ACP agent with tools and skills (Hermes, Claude Code, Codex); the page picks which
         self.agents = backstage.load(profile)
@@ -441,6 +445,8 @@ class Conversation:
             if spoken and remember:
                 label = "" if source == self.name else f"({source} {verb}) "
                 self.history.append({"role": "assistant", "content": label + " ".join(spoken)})
+                if self.e.recall:
+                    self.e.recall.add(f"{source} said", " ".join(spoken))
 
     async def turn(self, audio: np.ndarray | None, text: str | None) -> None:
         clock = Clock()
@@ -483,13 +489,20 @@ class Conversation:
             hands_q = bool(HANDS.search(low)) or (follow and recent[0] == "hands")
             fingers_q = bool(FINGERS.search(low)) or (follow and recent[0] == "hands")
             eyes_q = wants_eyes(text) or (follow and recent[0] in ("eyes", "sides"))
-            if self.e.memory:  # the log answers about the past even with the camera off now
-                earlier = await self.e.memory.past(text)
-                seen = self.e.memory.now() if camera_live and (earlier or eyes_q) else None
-                if seen or earlier:
-                    last = with_context(text, seen, earlier)
-                    clock.mark("remembered_ms" if earlier else "seen_ms")
-                    if earlier:
+            if self.e.memory or self.e.recall:  # the log answers about the past even with the camera off now
+                # the caption log's time window and the search by meaning side by side; the search waits at most
+                # its timeout_ms, and either may come back empty
+                async def nothing():
+                    return None
+                earlier, hits = await asyncio.gather(
+                    self.e.memory.past(text) if self.e.memory else nothing(),
+                    self.e.recall.search(text) if self.e.recall and recall.asks(text) else nothing())
+                recalled = recall.lines(hits) if hits else None
+                seen = self.e.memory.now() if self.e.memory and camera_live and (earlier or recalled or eyes_q) else None
+                if seen or earlier or recalled:
+                    last = with_context(text, seen, earlier, recalled=recalled)
+                    clock.mark("remembered_ms" if earlier or recalled else "seen_ms")
+                    if earlier or recalled:
                         await self.emit({"type": "remembering"})
 
             if camera_live and hands_q:  # fingers: say exactly what the hand tracker measured, now
@@ -644,6 +657,9 @@ class Conversation:
             if asked and self.history[-1]["role"] == "user":
                 if heard["yes"] and spoken:  # what was actually said goes in, even when cut off
                     self.history.append({"role": "assistant", "content": tag[0] + " ".join(spoken)})
+                    if self.e.recall:
+                        self.e.recall.add("you said", self.history[-2]["content"])
+                        self.e.recall.add(f"{self.name} said", " ".join(spoken))
                 else:
                     # a quiet turn nobody heard, or a reply stopped before its first words: as if it never happened (a
                     # placeholder such as "(interrupted)" in the history is copied by the brain and spoken as a reply)
@@ -672,7 +688,8 @@ def build(profile: dict) -> FastAPI:
         return JSONResponse({"ok": True, "profile": profile.get("name"), "asr": profile["asr"]["model"],
                              "brain": profile["brain"]["model"], "voice": profile["voice"]["model"],
                              "voice_lite": (profile.get("voice_lite") or {}).get("model"),
-                             "eyes": (profile.get("eyes") or {}).get("model")})
+                             "eyes": (profile.get("eyes") or {}).get("model"),
+                             "memory_search": (profile.get("memory_search") or {}).get("model")})
 
     @app.websocket("/ws")
     async def ws(socket: WebSocket):
@@ -738,6 +755,8 @@ def build(profile: dict) -> FastAPI:
                         engines.memory.every(event.get("seconds", 3))
                     elif event.get("type") == "keep" and engines.memory:  # how many days the camera memory keeps
                         asyncio.create_task(engines.memory.keep(event.get("days", 2)))
+                        if engines.recall:  # the search index keeps no longer than the captions
+                            engines.recall.keep(event.get("days", 2))
                     elif event.get("type") == "name":  # the page renamed the assistant
                         name = re.sub(r"[^\w '-]", "", str(event.get("name", ""))).strip()[:24]
                         old, talk.name = talk.name, name or engines.profile.get("assistant_name", "Boo")

@@ -434,6 +434,56 @@ take itself: after 3 s under −30 dBFS it drops the quiet tail and asks for the
 (a new text draws a new seed). On 12 paragraphs the stalled one came back whole in one extra request, and the other
 11 were byte-identical with the check on.
 
+## Memory search by meaning (optional)
+
+With a `memory_search` section in the profile, Boo also indexes what the camera saw (each Eyes of Kai caption) and what
+was said (each heard question and Boo's spoken reply) as vectors from an OpenAI-compatible `/v1/embeddings` server.
+A turn that asks about the past ("when did I last water the plants?", "what did we say about the trip?", "where did
+I leave my keys?") is then searched by meaning across every day the index keeps, beside the caption log's time
+window, and Bolt gets the nearest entries as dated lines ("Tue 14:03, seen: …", "you said: …").
+
+```json
+"memory_search": {
+  "url": "http://127.0.0.1:8421/v1",
+  "model": "embeddinggemma-2",
+  "dimensions": 256,
+  "top_k": 6,
+  "timeout_ms": 40,
+  "days": 2,
+  "path": "~/.keys-ghost-machine/recall.jsonl"
+}
+```
+
+- **Never slower than its timeout.** A question's embedding waits at most `timeout_ms` (40 ms by default). Past
+  that, or with the server down, the turn goes on without it and Boo answers from the caption log as before. Indexing
+  runs in the background, in batches.
+- **Local and short-lived.** The index is one file on this machine. It keeps what the captions keep (the page's
+  **Memory** setting, 1 to 7 days), and older entries are erased from memory and from the file.
+- **The model.** [EmbeddingGemma-2](https://huggingface.co/google/embeddinggemma-2) (Google DeepMind) is the
+  reference. On a DGX Spark it runs natively on TensorFold's CUDA engine, from our branch until it is upstream
+  (Ash Hart is building EmbeddingGemma-2 in TensorFold, Metal first, ashhart/TensorFold#1035):
+
+  ```sh
+  git clone -b embgemma2-cuda https://github.com/drowzeys/TensorFold && cd TensorFold
+  zig build native -Dnvcc=/usr/local/cuda/bin/nvcc
+  hf download google/embeddinggemma-2 --local-dir ~/models/embeddinggemma-2
+  zig-out/native/bin/tensorfold-native serve ~/models/embeddinggemma-2 --host 127.0.0.1 --port 8421
+  ```
+
+  Any OpenAI-compatible embeddings server works. `dimensions` uses the model's Matryoshka cuts (768, 512, 256 or 128;
+  256 ranks as well as 768 here); a server that refuses `dimensions` gets full vectors, cut by Boo.
+- **Measured on a DGX Spark** (synthetic data only), with TensorFold's EmbeddingGemma-2 engine:
+  - Vectors match sentence-transformers' own bf16 run to a cosine of 0.99986 or better, at 768, 512, 256 and 128
+    dimensions.
+  - 230 entries over 7 simulated days, 30 paraphrased questions: the right entry ranked first for 26 of them, in the
+    top three for 27.
+  - A search added a median of 4.5 ms to a turn (95th percentile 6.9 ms; all 60 within 40 ms): the question's embedding
+    over HTTP plus the scan of the index.
+  - The engine against sentence-transformers on the same GB10, in alternating rounds (median, HTTP included): one
+    16-token question 5.3 ms against 20.6 ms; 32 captions (928 tokens) 21.2 ms against 37.9 ms; one 512-token text
+    20.8 ms against 27.6 ms.
+- Text only for now: captions and words, not the frames themselves.
+
 ## Settings in the page
 
 - **Name**: what the assistant is called (Boo by default); it answers to it, and the header follows.
@@ -540,6 +590,8 @@ A profile names each engine and the turn timing:
   no keep-warm).
 - `turn`: VAD timing (`eager_silence_ms` starts work early, `end_silence_ms` confirms the end of a turn).
 - `eyes`: the camera model; `memory`: Eyes of Kai's URL, the captioner and `interval_s`.
+- `memory_search` (optional): an `/v1/embeddings` server for memory search by meaning; see
+  [Memory search by meaning](#memory-search-by-meaning-optional).
 - `agents` and `agent`: the back agents and the default one.
 
 ## Limitations
@@ -590,6 +642,7 @@ The code is MIT (LICENSE). Everything below keeps its own licence.
 | espeak-ng (through phonemizer-fork and espeakng-loader) | misaki's fallback pronunciation for words its dictionary lacks | espeak-ng contributors | GPL-3.0 | [GitHub](https://github.com/espeak-ng/espeak-ng) |
 | StyleTTS 2 | The architecture Kokoro-82M is built on (with an iSTFTNet decoder) | Yinghao Aaron Li et al. | MIT | [GitHub](https://github.com/yl4579/StyleTTS2) |
 | Eyes of Kai | The continuity log: timestamped captions so Boo can answer about the past | tonyd2wild | MIT | [GitHub](https://github.com/tonyd2wild/eyes-of-kai) |
+| EmbeddingGemma-2 | Memory search by meaning (optional): vectors of captions and conversation lines | Google DeepMind | Apache-2.0 (model card; deployments follow the Gemma Prohibited Use Policy) | [Hugging Face](https://huggingface.co/google/embeddinggemma-2) |
 | Hermes Agent | The back agent with tools and skills, over ACP | Nous Research | see repository | [GitHub](https://github.com/NousResearch/hermes-agent) |
 | qwen-audio-agent | Design inspiration: the frontstage/backstage split (a fast voice in front, a tool-using agent behind that reports back); no code from it is used | Qwen Audio team | Apache-2.0 | [GitHub](https://github.com/QwenAudio/qwen-audio-agent) |
 | RED-SNOW 5.3 Flash | The back agent's model in the reference setup (a GLM-5.3-Flash build); any OpenAI-compatible model works | RED-SNOW | see model card | — |
