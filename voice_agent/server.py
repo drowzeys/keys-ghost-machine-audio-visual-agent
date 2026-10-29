@@ -31,7 +31,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 
 from .engines import SIDES, SAMPLE_RATE, Brain, Clock, Said, sides, Recognizer, Vad, Voice, cancel, jpeg_to_png, sentences, unrepeated, wants_eyes
 from .memory import Memory, with_context
-from . import backstage, lookup, video
+from . import backstage, d1, lookup, video
 
 HERE = Path(__file__).resolve().parent
 LOGGED = {"transcript", "reply", "deep", "task", "confirm", "error", "metrics", "emotion", "repeat"}
@@ -152,7 +152,11 @@ class Engines:
         self.talks: set = set()  # the conversations open now
         # the video panel's job service (video.py), with its voice handle as one more back agent; never picked on the
         # page, it takes the turns that are about the video ("make a video of ...", "stop the video")
-        self.video = video.VideoService(profile["video"], profile["brain"], busy=self.busy) if profile.get("video") else None
+        # each clip is checked by d1-2B when the profile has a d1 server and the video section asks for it ("check": "d1")
+        checker = video.D1Checker(d1.D1(profile["d1"]), profile["video"].get("d1_check"), profile["video"].get("ffmpeg")) \
+            if profile.get("video", {}).get("check") == "d1" and profile.get("d1", {}).get("url") else None
+        self.video = video.VideoService(profile["video"], profile["brain"], checker=checker, busy=self.busy) \
+            if profile.get("video") else None
         if self.video:
             self.agents["video"] = video.VideoAgent("video", profile["video"], self.video)
             self.video.on_news.append(self.video_news)
@@ -772,7 +776,8 @@ def build(profile: dict) -> FastAPI:
                              "brain": profile["brain"]["model"], "voice": profile["voice"]["model"],
                              "voice_lite": (profile.get("voice_lite") or {}).get("model"),
                              "eyes": (profile.get("eyes") or {}).get("model"),
-                             "video": engines.video.renderer.name if engines.video else None})
+                             "video": engines.video.renderer.name if engines.video else None,
+                             "d1": "d1-2B (Liquid AI)" if profile.get("d1", {}).get("url") else None})
 
     # ----- the video panel (video.py) -----
 

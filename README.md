@@ -466,6 +466,13 @@ A profile turns it on with a `video` section. A run is refused when the render h
 voice models and that machine lacks room. The full design, including what the engines expose for live previews and the
 plan for the infinity engine, is in [docs/video-panel.md](docs/video-panel.md).
 
+**Clip checks with d1-2B (optional, DGX Spark).** With `"check": "d1"` in the `video` section and a `d1` server in
+the profile, each finished clip is checked before it is kept: d1-2B (Liquid AI) reads four frames and answers whether
+the same person stays, whether the scene cuts away, and whether clothes or place change, in about 70–140 ms. A clip it
+is sure about is made again; a flagged one can first go to a stronger vision model (`d1_check.confirm`, e.g. Gemma 4
+12B). On 20 synthetic test clips it retook 11 of 12 faulty ones and none of the 8 clean ones. See
+[docs/video-panel.md](docs/video-panel.md) and, for running d1-2B on TensorFold, the `d1-assist` branch's README.
+
 ## Prebuilt builds
 
 The [v0.3.0 release](https://github.com/drowzeys/keys-ghost-machine-audio-visual-agent/releases/tag/v0.3.0) has

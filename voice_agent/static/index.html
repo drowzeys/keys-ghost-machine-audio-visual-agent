@@ -63,6 +63,7 @@
   .camnote { color: var(--muted); font: 10px/1.3 ui-monospace, monospace; }
 
   /* the video panel: the clip or its live render on top, the beat, the strip of recent clips, the controls */
+  #vStrip button.flagged { outline: 2px solid #e0a040; outline-offset: -2px; }
   #vView { position: relative; aspect-ratio: 16 / 9; border-radius: 12px; overflow: hidden; background: #05030a; border: 1px solid color-mix(in srgb, var(--gold) 35%, var(--line)); flex: none; }
   #vView video, #vView canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: none; background: #05030a; }
   #vView.clip #vMain, #vView.live #vLive { display: block; }
@@ -966,6 +967,8 @@ function videoUpdate(st) {
     strip.textContent = "";
     for (const k of keep) {
       const b = document.createElement("button"); b.type = "button"; b.dataset.key = st.run + ":" + k.index; b.title = k.prompt || "";
+      // what the clip checker (d1-2B) found, and whether the clip was made again for it
+      if (k.checks && k.checks.notes && k.checks.notes.length) { b.title += "\nChecked by " + k.checks.by + ": " + k.checks.notes.join("; ") + (k.retakes ? " (retaken " + k.retakes + "x)" : ""); b.classList.add("flagged"); }
       b.setAttribute("aria-label", "Play clip " + (k.index + 1));
       if (k.poster) { const i = document.createElement("img"); i.loading = "lazy"; i.alt = ""; i.src = k.poster; b.append(i); }
       const n = document.createElement("span"); n.textContent = k.index + 1; b.append(n);
@@ -1053,7 +1056,7 @@ for (const s of ["idle", "listening", "thinking", "speaking", "interrupted"]) { 
 { const b = document.createElement("button"); b.textContent = "▸ agent orb"; b.onclick = () => { orbUntil = performance.now() + 6000; tag("deep", "→ Hermes", 3000); }; $("dev").append(b); }
 document.addEventListener("keydown", (e) => { if (e.key === "?" && document.activeElement !== $("say")) $("dev").classList.toggle("on"); });
 
-fetch("/health").then((r) => r.json()).then((h) => { $("sub").textContent = h.asr.split("/").pop() + " · " + h.brain + " · " + h.voice + (h.voice_lite ? " / " + h.voice_lite : "") + (h.eyes ? " · eyes " + h.eyes : "") + " (" + h.profile + ")"; }).catch(() => {});
+fetch("/health").then((r) => r.json()).then((h) => { $("sub").textContent = h.asr.split("/").pop() + " · " + h.brain + " · " + h.voice + (h.voice_lite ? " / " + h.voice_lite : "") + (h.eyes ? " · eyes " + h.eyes : "") + (h.d1 ? " · assist " + h.d1 : "") + " (" + h.profile + ")"; }).catch(() => {});
 $("fxSel").checked = fxOn;
 $("fxSel").onchange = () => { fxOn = $("fxSel").checked; store.set("boo.fx", fxOn ? "1" : "0"); tag("look", fxOn ? "voice · futuristic on" : "voice · futuristic off", 2000); };
 { const saved = store.get("boo.scan"); if (saved && [...$("scanSel").options].some((o) => o.value === saved)) $("scanSel").value = saved; }

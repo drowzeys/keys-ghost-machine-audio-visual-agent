@@ -89,8 +89,22 @@ below keeps its own licence.
   idea behind continue mode, an endless film that plans its next clip from the story so far and checks itself. Only
   the idea is used; no code from either is in this repository. The planned dense checks take their approach (many
   small yes/no questions, decided in code) from Imagination Studio's AutoPilot.
-- **FFmpeg** (LGPL-2.1+/GPL, [ffmpeg.org](https://ffmpeg.org)): the posters and the joined film, used if it is
-  installed. It is not shipped here.
+- **d1-2B** by Liquid AI (LFM Open License v1.0; see the d1-2B assist section below): the optional clip checker
+  (`video.D1Checker`), with an optional OpenAI-compatible vision model (such as Google's Gemma 4 12B, under its own
+  licence) to confirm what it flags.
+- **FFmpeg** (LGPL-2.1+/GPL, [ffmpeg.org](https://ffmpeg.org)): the posters, the joined film and the checker's frames,
+  used if it is installed. It is not shipped here.
+
+## d1-2B assist (optional)
+
+- **d1-2B** by [Liquid AI](https://huggingface.co/LiquidAI/d1-2B) (LFM Open License v1.0): a decision model built on
+  LFM3-VL-2B that answers questions with probabilities in one pass. Boo asks it where a turn the patterns miss should
+  go and what a reply to a tool-permission question means (`voice_agent/d1.py`). The licence allows use,
+  modification and redistribution (with the licence and notices kept); commercial use is licensed only to a company
+  under US$10 million in annual revenue (non-profits are exempt for non-commercial or research use).
+- **d1-2B on TensorFold CUDA** (the bf16 LFM3 text decoder, the LFM3-VL vision tower, d1's set attention and decision
+  head) is our port, on [drowzeys/TensorFold](https://github.com/drowzeys/TensorFold) branch `d1-2b-cuda-wip`, built
+  on the open LFM3 work upstream ([ashhart/TensorFold](https://github.com/ashhart/TensorFold) #1513, #1514, #1508).
 
 ## Earlier versions
 
