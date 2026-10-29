@@ -31,10 +31,10 @@ from fastapi.responses import FileResponse, JSONResponse
 
 from .engines import SIDES, SAMPLE_RATE, Brain, Clock, Said, sides, Recognizer, Vad, Voice, cancel, jpeg_to_png, sentences, unrepeated, wants_eyes
 from .memory import PAST, Memory, with_context
-from . import backstage, d1, lookup, recall
+from . import backstage, d1, lookup, recall, replies
 
 HERE = Path(__file__).resolve().parent
-LOGGED = {"transcript", "reply", "deep", "task", "confirm", "error", "metrics", "emotion", "repeat", "routed"}
+LOGGED = {"transcript", "reply", "deep", "task", "confirm", "error", "metrics", "emotion", "repeat", "routed", "degenerate"}
 
 
 HANDS = re.compile(r"\b(fingers?|thumbs?|hands?|holding up|gestures?|peace sign|counting|how many am i)\b")
@@ -425,6 +425,7 @@ class Conversation:
         is no part of the conversation (the sample after a voice switch) is not kept at all (``remember=False``)."""
 
         spoken: list[str] = []
+        finished = False
         self.heard = {"yes": True}
         speaker = self.voice  # a switch of engine mid-reply applies to the next reply (one sample rate per reply)
         try:
@@ -441,12 +442,14 @@ class Conversation:
                             await self.emit({"type": "audio_start", "sample_rate": speaker.sample_rate})
                         await self.emit(pcm)
                 spoken.append(sentence)
+            finished = True
             await self.emit({"type": "audio_end"})
         finally:
             self.speaking = False
             if spoken and remember:
                 label = "" if source == self.name else f"({source} {verb}) "
-                self.history.append({"role": "assistant", "content": label + " ".join(spoken)})
+                said = " ".join(spoken) if finished else replies.cut_off(" ".join(spoken))
+                self.history.append({"role": "assistant", "content": label + said})
                 if self.e.recall:
                     self.e.recall.add(f"{source} said", " ".join(spoken))
 
@@ -454,6 +457,8 @@ class Conversation:
         clock = Clock()
         speaker = self.voice  # a switch of engine mid-reply applies to the next reply (one sample rate per reply)
         spoken: list[str] = []
+        finished = False  # the whole reply was spoken (not stopped by barge-in, a new turn or an engine error)
+        written: list[str] = []  # the front brain's reply as far as it was written, read ahead of the voice
         asked = False
         tag = [""]  # the mood tag, kept in the history so the brain keeps tagging
         jobs: list[asyncio.Task] = []  # the back brain, stopped with the turn
@@ -601,11 +606,35 @@ class Conversation:
             spoken_any = [False, False]
             said_text = [""]
 
+            async def answer():
+                """The brain's reply as it streams; the front brain's is guarded (replies.guarded): a reply that is
+                only tags, or two words that only begin an earlier reply, is asked for once more with a nudge, and
+                never spoken as silence."""
+
+                asked_of = self.messages(note, last)
+                if brain is not self.e.brain or picture is not None:
+                    async for piece in brain.stream(asked_of, picture):
+                        yield piece
+                    return
+                earlier = [m["content"] for m in self.history if m["role"] == "assistant" and isinstance(m["content"], str)]
+                nudged = [{**asked_of[0], "content": f"{asked_of[0]['content']} {replies.RETRY_NOTE}"}] + asked_of[1:]
+
+                def first() -> None:
+                    clock.mark("first_token_ms")  # the brain's own first token, not the end of the hold
+
+                def retried(text: str) -> None:
+                    log({"type": "degenerate", "text": text})
+                    clock.mark("retry_ms")
+
+                async for piece in replies.guarded(brain.stream(asked_of), earlier, lambda: brain.stream(nudged),
+                                                   lambda: handed[0], first, retried, written):
+                    yield piece
+
             async def pieces():
                 # tags such as "[happy]" and "[deep]" go to the face and the back agent, never to the voice; a model
                 # may put one mid-reply and a token may hold half of one, so text after an open "[" waits for its "]"
                 carry = ""
-                async for piece in brain.stream(self.messages(note, last), picture):
+                async for piece in answer():
                     clock.mark("first_token_ms")
                     carry += piece
                     if "[" in carry[carry.rfind("]") + 1:] and len(carry) - carry.rfind("[") < 24:
@@ -663,6 +692,7 @@ class Conversation:
                         await self.emit(pcm)
                 spoken.append(sentence)
             clock.mark("done_ms")
+            finished = True
             if repeat:
                 log({"type": "repeat", "text": repeat[0]})
             await self.emit({"type": "audio_end"})
@@ -677,7 +707,11 @@ class Conversation:
                 job.cancel()
             if asked and self.history[-1]["role"] == "user":
                 if heard["yes"] and spoken:  # what was actually said goes in, even when cut off
-                    self.history.append({"role": "assistant", "content": tag[0] + " ".join(spoken)})
+                    # a cut reply is stored whole with the cut marked (replies.cut_reply): stored bare, its fragment
+                    # reads as a finished reply and a brain that copies its earlier turns ends its next replies the
+                    # same way ("I am on" -> "I" -> nothing)
+                    said = " ".join(spoken) if finished else replies.cut_reply(" ".join(spoken), "".join(written))
+                    self.history.append({"role": "assistant", "content": tag[0] + said})
                     if self.e.recall:
                         self.e.recall.add("you said", self.history[-2]["content"])
                         self.e.recall.add(f"{self.name} said", " ".join(spoken))
