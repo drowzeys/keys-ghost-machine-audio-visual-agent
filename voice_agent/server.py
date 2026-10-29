@@ -30,11 +30,11 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 
 from .engines import SIDES, SAMPLE_RATE, Brain, Clock, Said, sides, Recognizer, Vad, Voice, cancel, jpeg_to_png, sentences, unrepeated, wants_eyes
-from .memory import Memory, with_context
-from . import backstage, lookup
+from .memory import PAST, Memory, with_context
+from . import backstage, d1, lookup
 
 HERE = Path(__file__).resolve().parent
-LOGGED = {"transcript", "reply", "deep", "task", "confirm", "error", "metrics", "emotion", "repeat"}
+LOGGED = {"transcript", "reply", "deep", "task", "confirm", "error", "metrics", "emotion", "repeat", "routed"}
 
 
 HANDS = re.compile(r"\b(fingers?|thumbs?|hands?|holding up|gestures?|peace sign|counting|how many am i)\b")
@@ -141,6 +141,8 @@ class Engines:
         self.eyes = Brain({**profile["brain"], **profile["eyes"]}) if profile.get("eyes") else None
         # Eyes of Kai: captions every camera frame into a timestamped log the brain can look back through
         self.memory = Memory(profile["memory"]) if profile.get("memory") else None
+        # d1-2B (optional): routes a turn the patterns below cannot place, and reads a tool-permission reply they miss
+        self.d1 = d1.D1(profile["d1"]) if profile.get("d1", {}).get("url") else None
         # the back agents a turn is handed to when the front brain tags it [deep]: a direct model (Redsnow 5.3) or an
         # ACP agent with tools and skills (Hermes, Claude Code, Codex); the page picks which
         self.agents = backstage.load(profile)
@@ -459,7 +461,11 @@ class Conversation:
             if not text:
                 return
             ask = self.asking
-            if ask and not ask["future"].done() and (choice := backstage.answer(text)):
+            choice = backstage.answer(text) if ask and not ask["future"].done() else None
+            if ask and not choice and not ask["future"].done() and self.e.d1:  # words the patterns miss: d1 reads them
+                choice = await self.e.d1.permission(text)
+                clock.mark("d1_ms")
+            if ask and not ask["future"].done() and choice:
                 while not heard["yes"]:  # a quiet turn answers only once it is let out (the person really stopped)
                     await asyncio.sleep(0.05)
                 if not ask["future"].done():
@@ -483,8 +489,23 @@ class Conversation:
             hands_q = bool(HANDS.search(low)) or (follow and recent[0] == "hands")
             fingers_q = bool(FINGERS.search(low)) or (follow and recent[0] == "hands")
             eyes_q = wants_eyes(text) or (follow and recent[0] in ("eyes", "sides"))
+            agent = self.e.agents.get(self.agent)
+            routed = None  # where d1 sent a turn the patterns could not place
+            if self.e.d1 and not (hands_q or eyes_q or SIDES.search(text) or backstage.LIVE.search(low) or follow
+                                  or (self.e.memory and PAST.search(text)) or (agent and backstage.asked_for(text, agent))):
+                offered = {"camera", "side", "fingers"} if camera_live and self.e.eyes else set()
+                offered |= {"memory"} if self.e.memory else set()
+                offered |= {"fact"} if self.e.lookup else set()
+                offered |= {"task"} if agent else set()
+                routed = await self.e.d1.route(text, offered | {"chat"})
+                clock.mark("d1_ms")
+                clock.marks["d1_call_ms"] = round(self.e.d1.last_ms, 1) if self.e.d1.last_ms is not None else -1  # -1: gave up
+                if routed:
+                    await self.emit({"type": "routed", "route": routed, "ms": self.e.d1.last_ms})
+                hands_q = fingers_q = hands_q or routed == "fingers"
+                eyes_q = eyes_q or routed == "camera"
             if self.e.memory:  # the log answers about the past even with the camera off now
-                earlier = await self.e.memory.past(text)
+                earlier = await self.e.memory.past(text, force=routed == "memory")
                 seen = self.e.memory.now() if camera_live and (earlier or eyes_q) else None
                 if seen or earlier:
                     last = with_context(text, seen, earlier)
@@ -500,7 +521,7 @@ class Conversation:
                 self.visual = ("hands", time.monotonic(), text if not follow else recent[2])
 
             brain, picture = self.e.brain, None
-            if self.e.eyes and camera_live and SIDES.search(text) and not fingers_q:
+            if self.e.eyes and camera_live and (SIDES.search(text) or routed == "side") and not fingers_q:
                 # left or right: the picture side from the person's own (mirrored) view, said as theirs, word for word
                 await self.emit({"type": "looking"})
                 mirrored = await asyncio.to_thread(jpeg_to_png, self.frame, 640, True)
@@ -525,7 +546,6 @@ class Conversation:
                 clock.mark("looked_ms")
 
             deep: list[asyncio.Queue] = []  # a direct back agent's reply, when the front brain hands the turn over
-            agent = self.e.agents.get(self.agent)
             handed = [False]
 
             async def think_deep(queue: asyncio.Queue) -> None:
@@ -549,7 +569,8 @@ class Conversation:
             # model copies their brackets around a whole answer
             note = EYES_SYSTEM.format(name=self.name) if picture is not None else None
             looked_up = None
-            if self.e.lookup and backstage.LIVE.search(text.lower()) and not (agent and backstage.asked_for(text, agent, live=False)):
+            if self.e.lookup and (backstage.LIVE.search(text.lower()) or routed == "fact") \
+                    and not (agent and backstage.asked_for(text, agent, live=False)):
                 # a live fact: search now and let the front brain answer in this turn (seconds, not a back agent's half minute)
                 await self.emit({"type": "emotion", "emotion": "thinking"})
                 looked_up = await lookup.look_up(text, self.e.lookup)
@@ -558,7 +579,7 @@ class Conversation:
                     last, brain, picture = looked_up, self.e.brain, None
             if looked_up:
                 pass
-            elif agent and backstage.asked_for(text, agent):  # "ask Hermes ...", live facts: hand over at once
+            elif agent and (backstage.asked_for(text, agent) or routed == "task"):  # "ask Hermes ...", live facts, d1's tasks: at once
                 await hand_over()
                 if agent.kind == "acp":  # a fixed short line: the front brain would guess the answer from memory
                     await self.emit({"type": "emotion", "emotion": "thinking"})
@@ -672,7 +693,8 @@ def build(profile: dict) -> FastAPI:
         return JSONResponse({"ok": True, "profile": profile.get("name"), "asr": profile["asr"]["model"],
                              "brain": profile["brain"]["model"], "voice": profile["voice"]["model"],
                              "voice_lite": (profile.get("voice_lite") or {}).get("model"),
-                             "eyes": (profile.get("eyes") or {}).get("model")})
+                             "eyes": (profile.get("eyes") or {}).get("model"),
+                             "d1": "d1-2B (Liquid AI)" if profile.get("d1", {}).get("url") else None})
 
     @app.websocket("/ws")
     async def ws(socket: WebSocket):

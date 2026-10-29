@@ -321,6 +321,59 @@ when disk is short, or when you want the fastest replies on a Spark; take `both`
 **Turning it on:** `install.sh --voice lite` (or `both`), `kgm voice lite` on an install that has it, `VOICE_ENGINE=lite`
 for Docker, or by hand `./serve-kokoro.sh` then `./serve.sh profiles/mac.json lite` (see [Profiles](#profiles)).
 
+## d1-2B assist (optional, DGX Spark)
+
+[d1-2B](https://huggingface.co/LiquidAI/d1-2B) (Liquid AI, LFM Open License v1.0) is a small decision model: it answers
+questions about a short text, with calibrated probabilities, in one forward pass and without writing any text. Boo can
+ask it two things, each with a deadline, so it never holds a turn up by more than `timeout_ms`:
+
+- **Where a turn goes, when Boo's patterns can't tell.** Boo's own patterns route camera, side, finger, memory,
+  live-fact and "ask Hermes" turns instantly, and they still come first. A turn they don't place goes to d1, which picks
+  between the routes this Boo can act on and plain chat. If d1 is sure enough, the turn takes its fast path straight away
+  ("run the backup script on the server" is handed to the back agent at once, "what's behind me?" goes to the camera)
+  instead of waiting for the front brain's reply and a `[deep]` tag. Otherwise nothing changes.
+- **What a reply to a tool-permission question means**, when the yes/no/always patterns miss it ("go on then",
+  "hold off on that").
+
+Turn it on with a `d1` section in the profile (`"d1": {"url": "http://127.0.0.1:8412", "threshold": 0.8,
+"timeout_ms": 60}`), or `-e D1_URL=http://127.0.0.1:8412` in Docker. A down or slow d1 server, or an answer under
+`threshold`, leaves Boo exactly as it is without d1. `thresholds` sets a bar per route; a hand-over to the back agent
+needs 0.85 unless set, because a chat sent there waits half a minute for tools. `route` and `permission` (true by
+default) switch either part off.
+
+**Running d1-2B on TensorFold.** d1-2B runs on our CUDA port (the bf16 LFM3 text decoder, the LFM3-VL vision tower, d1's
+set attention), branch `d1-2b-cuda-wip` of [drowzeys/TensorFold](https://github.com/drowzeys/TensorFold), until it is
+accepted upstream:
+
+```sh
+git clone -b d1-2b-cuda-wip https://github.com/drowzeys/TensorFold && cd TensorFold
+zig build native -Doptimize=ReleaseFast -Dnvcc=/usr/local/cuda/bin/nvcc     # Zig 0.17.0, CUDA 13
+hf download LiquidAI/d1-2B --local-dir ~/models/d1-2B
+TF_D1_ATTENTION=causal zig-out/native/bin/tensorfold-native serve ~/models/d1-2B --host 127.0.0.1 --port 8412
+```
+
+`TF_D1_ATTENTION=causal` reads each question on its own, which routed better in our tests. About 5 GB of GPU memory.
+
+**Measured on a DGX Spark** (synthetic phrases spoken by Kokoro's stock voices, the public 0.3.0 image with this
+branch's code, Parakeet, Kokoro Lite and Bolt; other work shared the GPU):
+
+| | Without d1 | With d1 |
+|---|---|---|
+| d1's own call, per turn the patterns miss | — | 24–25 ms median (20–59 ms); gave up at 60 ms on 3 of 66 |
+| Bolt's first token, from when it is asked | 86–106 ms | 96–120 ms |
+| Back-agent requests handed over | 3 of 6 | 9 of 12 |
+| Time to the hand-over | 261 ms median | 111 ms median |
+| Chat turns kept as chat | 9 of 10 | 18 of 20 ("how do I make a video in an editor" went to the back agent) |
+| Live facts looked up | 4 of 5 | 9 of 10 |
+
+On 37 routing phrases with 7 routes, Boo's patterns alone were right on 26; patterns plus d1 at 0.85 on 29, with none
+made wrong, and at 0.8 on 30, with one chat turn sent to the back agent. d1 alone, given every phrase, was right on
+86–89%. Bolt's speed is unchanged after a d1 call (first token 62 vs 61 ms, 30 alternating requests). Permission
+replies: 11 of 16 synthetic ones read right at 0.8. One "from now on, go ahead" was read as a one-time yes, and the
+other four misses were left to Boo's usual question; no "no" was read as a yes. In the full loop, turns with d1 on ran 30–100 ms behind turns with it off beyond the call itself,
+from GPU load that changed between runs and from back-agent answers still being written; we did not find a cause in
+d1.
+
 ## See it work
 
 [![Watch the promo: Boo answering live facts, reading a desk through the camera, handing a task to Hermes and being renamed](docs/media/promo-poster.jpg)](https://github.com/drowzeys/keys-ghost-machine-audio-visual-agent/blob/main/docs/media/promo-landscape.mp4)
@@ -541,6 +594,8 @@ A profile names each engine and the turn timing:
 - `turn`: VAD timing (`eager_silence_ms` starts work early, `end_silence_ms` confirms the end of a turn).
 - `eyes`: the camera model; `memory`: Eyes of Kai's URL, the captioner and `interval_s`.
 - `agents` and `agent`: the back agents and the default one.
+- `d1` (optional): a d1-2B server's `url`, `threshold`, `thresholds`, `timeout_ms`, `route` and `permission`
+  ([d1-2B assist](#d1-2b-assist-optional-dgx-spark)).
 
 ## Limitations
 
