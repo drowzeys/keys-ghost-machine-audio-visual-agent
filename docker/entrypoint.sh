@@ -4,6 +4,7 @@
 #   /models/drama    Drama 3 NVFP4 pruned (plotarmordev/drama-3-NVFP4-Pruned)  -> keys build (voices, NVFP4)
 #   /models/cosmos3  Cosmos3-Edge converted with tools/cosmos3_edge_to_mlx.py  -> keys build (Cosmos3 on CUDA)
 # D1_URL (a d1-2B TensorFold server's address) turns on the d1 assist (D1_THRESHOLD, D1_TIMEOUT_MS; README).
+# EYES_URL (+ EYES_MODEL) sends camera questions to another vision server, such as LFM3-VL-2B on TensorFold (README).
 # A model whose folder is missing is skipped; its URL can point at another server instead (BOLT_URL, DRAMA_URL,
 # COSMOS_URL). KAI=1 also starts Eyes of Kai for camera memory. HERMES_CMD (e.g. "ssh host hermes acp") or
 # DEEP_URL + DEEP_MODEL add a back agent. VOICE_ENGINE=lite speaks with Kokoro-82M instead of Drama 3 (no /models/drama
@@ -74,6 +75,9 @@ if os.path.isdir("/models/cosmos3") or "COSMOS_URL" in os.environ:
     p["memory"]["captioner"]["url"] = cosmos
 else:
     p.pop("eyes", None)
+if os.environ.get("EYES_URL"):  # another camera model (thinking off, greedy); Cosmos3 still captions the memory
+    p["eyes"] = {"url": os.environ["EYES_URL"], "model": os.environ.get("EYES_MODEL", "lfm3-vl-2b"), "thinking": False,
+                 "extra": {"max_tokens": 120, "temperature": 0}}
 if os.environ.get("KAI") != "1":
     p.pop("memory", None)
 agents = {}

@@ -1,0 +1,11 @@
+{
+  "eyes": {
+    "url": "http://127.0.0.1:8413/v1",
+    "model": "lfm3-vl-2b",
+    "thinking": false,
+    "extra": {
+      "max_tokens": 120,
+      "temperature": 0
+    }
+  }
+}

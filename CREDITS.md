@@ -88,6 +88,18 @@ below keeps its own licence.
   head) is our port, on [drowzeys/TensorFold](https://github.com/drowzeys/TensorFold) branch `d1-2b-cuda-wip`, built
   on the open LFM3 work upstream ([ashhart/TensorFold](https://github.com/ashhart/TensorFold) #1513, #1514, #1508).
 
+## LFM3-VL-2B eyes (optional)
+
+- **LFM3-VL-2B** by [Liquid AI](https://huggingface.co/LiquidAI/LFM3-VL-2B) (LFM Open License v1.0): a small vision
+  model that can answer the camera questions instead of Cosmos3-Edge (`profiles/eyes-lfm3-vl.example.json`). The
+  licence allows use, modification and redistribution (with the licence and notices kept); commercial use is licensed
+  only to a company under US$10 million in annual revenue (non-profits are exempt for non-commercial or research use).
+- **LFM3-VL-2B on TensorFold CUDA** (LFM3's text decoder from the bf16 release with its prompt rows on cuBLASLt, the
+  LFM3-VL vision tower from the d1-2B port, images over the prompt) is our port, on
+  [drowzeys/TensorFold](https://github.com/drowzeys/TensorFold) branch `lfm3-vl-cuda`, built on the d1-2B port and
+  the open LFM3 work upstream ([ashhart/TensorFold](https://github.com/ashhart/TensorFold) #1513, #1514, #1508, and
+  #1502's LFM3-VL tower on Metal). It is checked against transformers running the checkpoint's own code.
+
 ## Earlier versions
 
 Earlier versions captioned with Qwen3.5-0.8B (Qwen team, Alibaba Cloud, Apache-2.0) and answered camera questions with

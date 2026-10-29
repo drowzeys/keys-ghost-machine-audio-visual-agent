@@ -36,7 +36,8 @@
   },
   "eyes": {
     "url": "http://127.0.0.1:8099/v1",
-    "model": "cosmos3"
+    "model": "cosmos3",
+    "thinking": false
   },
   "memory": {
     "url": "http://127.0.0.1:3870",
