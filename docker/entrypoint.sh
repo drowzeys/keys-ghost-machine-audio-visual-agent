@@ -3,6 +3,7 @@
 #   /models/bolt     Nemotron 3.5 Bolt 74B-A9B (TensorFold 24 GB layout)       -> stock TensorFold 1.1.5
 #   /models/drama    Drama 3 NVFP4 pruned (plotarmordev/drama-3-NVFP4-Pruned)  -> keys build (voices, NVFP4)
 #   /models/cosmos3  Cosmos3-Edge converted with tools/cosmos3_edge_to_mlx.py  -> keys build (Cosmos3 on CUDA)
+# D1_URL (a d1-2B TensorFold server's address) turns on the d1 assist (D1_THRESHOLD, D1_TIMEOUT_MS; README).
 # A model whose folder is missing is skipped; its URL can point at another server instead (BOLT_URL, DRAMA_URL,
 # COSMOS_URL). KAI=1 also starts Eyes of Kai for camera memory. HERMES_CMD (e.g. "ssh host hermes acp") or
 # DEEP_URL + DEEP_MODEL add a back agent. VOICE_ENGINE=lite speaks with Kokoro-82M instead of Drama 3 (no /models/drama
@@ -82,6 +83,9 @@ if os.environ.get("DEEP_URL"):
     agents["deep"] = dict(p["agents"]["deep"], url=os.environ["DEEP_URL"], model=os.environ.get("DEEP_MODEL", "your-model"))
 p["agents"] = agents
 p["agent"] = next(iter(agents), None)
+if os.environ.get("D1_URL"):  # d1-2B assist (optional): routes turns the patterns miss, reads permission replies
+    p["d1"] = {"url": os.environ["D1_URL"], "threshold": float(os.environ.get("D1_THRESHOLD", "0.8")),
+               "timeout_ms": float(os.environ.get("D1_TIMEOUT_MS", "60"))}
 json.dump(p, open("/tmp/boo-profile.json", "w"), indent=2)
 PY
 echo "[boo] agent on 0.0.0.0:$BOO_PORT"

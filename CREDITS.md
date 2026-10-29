@@ -77,6 +77,17 @@ below keeps its own licence.
 - **ddgs** (Dux Distributed Global Search, MIT) by deedy5: the web search behind quick live facts.
 - **wttr.in** by Igor Chubin (Apache-2.0), with data from WorldWeatherOnline: the weather lookup.
 
+## d1-2B assist (optional)
+
+- **d1-2B** by [Liquid AI](https://huggingface.co/LiquidAI/d1-2B) (LFM Open License v1.0): a decision model built on
+  LFM3-VL-2B that answers questions with probabilities in one pass. Boo asks it where a turn the patterns miss should
+  go and what a reply to a tool-permission question means (`voice_agent/d1.py`). The licence allows use,
+  modification and redistribution (with the licence and notices kept); commercial use is licensed only to a company
+  under US$10 million in annual revenue (non-profits are exempt for non-commercial or research use).
+- **d1-2B on TensorFold CUDA** (the bf16 LFM3 text decoder, the LFM3-VL vision tower, d1's set attention and decision
+  head) is our port, on [drowzeys/TensorFold](https://github.com/drowzeys/TensorFold) branch `d1-2b-cuda-wip`, built
+  on the open LFM3 work upstream ([ashhart/TensorFold](https://github.com/ashhart/TensorFold) #1513, #1514, #1508).
+
 ## Earlier versions
 
 Earlier versions captioned with Qwen3.5-0.8B (Qwen team, Alibaba Cloud, Apache-2.0) and answered camera questions with

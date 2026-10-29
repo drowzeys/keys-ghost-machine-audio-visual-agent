@@ -71,6 +71,8 @@ async def main() -> None:
                         got["rate"] = e.get("sample_rate", 44100)
                     if e["type"] in ("transcript", "reply"):
                         got.setdefault(e["type"], []).append(e["text"])
+                    if e["type"] in ("routed", "deep"):  # where the turn went: d1's route, a back agent's hand-over
+                        got[e["type"]] = e.get("route") or e.get("agent") or True
                     if e["type"] == "speech_end":
                         got["ends"] = got.get("ends", 0) + 1
                     if e["type"] == "interrupt" and not interrupted.done():
@@ -110,7 +112,8 @@ async def main() -> None:
                     pass
             task.cancel()
             row.update({"ends": got.get("ends", 0), "heard": " ".join(got.get("transcript", [])), "said": " ".join(got.get("reply", [])),
-                        "reply_audio_s": round(got["audio_bytes"] / 2 / got["rate"], 2), **{"srv_" + k: v for k, v in got.get("server", {}).items()}})
+                        "reply_audio_s": round(got["audio_bytes"] / 2 / got["rate"], 2),
+                        **{k: got[k] for k in ("routed", "deep") if k in got}, **{"srv_" + k: v for k, v in got.get("server", {}).items()}})
             results.append(row)
             print(json.dumps(row), flush=True)
             await asyncio.sleep(0.5)

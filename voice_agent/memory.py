@@ -155,10 +155,11 @@ class Memory:
             return self.latest[1]
         return None
 
-    async def past(self, text: str) -> str | None:
-        """The log's segments for the time a question asks about, or None if it is not about the past."""
+    async def past(self, text: str, force: bool = False) -> str | None:
+        """The log's segments for the time a question asks about, or None if it is not about the past (``force``: d1
+        read it as a question about the past in words the pattern misses; the last half hour, Kai's default)."""
 
-        if not PAST.search(text):
+        if not force and not PAST.search(text):
             return None
         start, end = window_for(text)
         now = time.time()

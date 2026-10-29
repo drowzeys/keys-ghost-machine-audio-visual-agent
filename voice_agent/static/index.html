@@ -791,7 +791,7 @@ for (const s of ["idle", "listening", "thinking", "speaking", "interrupted"]) { 
 { const b = document.createElement("button"); b.textContent = "▸ agent orb"; b.onclick = () => { orbUntil = performance.now() + 6000; tag("deep", "→ Hermes", 3000); }; $("dev").append(b); }
 document.addEventListener("keydown", (e) => { if (e.key === "?" && document.activeElement !== $("say")) $("dev").classList.toggle("on"); });
 
-fetch("/health").then((r) => r.json()).then((h) => { $("sub").textContent = h.asr.split("/").pop() + " · " + h.brain + " · " + h.voice + (h.voice_lite ? " / " + h.voice_lite : "") + (h.eyes ? " · eyes " + h.eyes : "") + (h.memory_search ? " · memory " + h.memory_search : "") + " (" + h.profile + ")"; }).catch(() => {});
+fetch("/health").then((r) => r.json()).then((h) => { $("sub").textContent = h.asr.split("/").pop() + " · " + h.brain + " · " + h.voice + (h.voice_lite ? " / " + h.voice_lite : "") + (h.eyes ? " · eyes " + h.eyes : "") + (h.memory_search ? " · memory " + h.memory_search : "") + (h.d1 ? " · assist " + h.d1 : "") + " (" + h.profile + ")"; }).catch(() => {});
 $("fxSel").checked = fxOn;
 $("fxSel").onchange = () => { fxOn = $("fxSel").checked; store.set("boo.fx", fxOn ? "1" : "0"); tag("look", fxOn ? "voice · futuristic on" : "voice · futuristic off", 2000); };
 { const saved = store.get("boo.scan"); if (saved && [...$("scanSel").options].some((o) => o.value === saved)) $("scanSel").value = saved; }
