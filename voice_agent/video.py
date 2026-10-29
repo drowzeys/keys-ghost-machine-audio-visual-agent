@@ -42,6 +42,7 @@ before it is kept; the one here passes everything, and the dense checks come lat
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import os
 import platform
@@ -350,6 +351,105 @@ class Checker:
         return Verdict()
 
 
+class D1Checker(Checker):
+    """d1-2B (d1.py) looks at four frames of a finished clip and answers yes/no checks in one pass (about 70 ms on a
+    DGX Spark): the same person throughout, no hard cut, the same clothes, the same place. A failed check is a note
+    for the planner and, past ``threshold``, a retake. d1 misses some person swaps (5 of 8 in our checks), so a clip it
+    flags can go to a stronger checker (``confirm``: an OpenAI-compatible vision model, such as Gemma 4 12B) before
+    it is retaken; with no answer from either, the clip is kept, as with no checker."""
+
+    # (question, the answer that means a fault, the note told to the planner)
+    CHECKS = {
+        "person": ("Is the same person (or the same people) shown throughout the clip, with no one replaced by a "
+                   "different person?", False, "the person changed partway through"),
+        "cut": ("Does the scene change abruptly partway through (a hard cut to a different place or shot)?", True,
+                "the clip cut to a different shot"),
+        "wardrobe": ("Does any person's clothing change colour partway through the clip?", True,
+                     "someone's clothes changed"),
+        "place": ("Is it the same place throughout the clip?", False, "the place changed"),
+    }
+    STATE = "These are frames in time order, evenly spaced across one short video clip."
+
+    def __init__(self, d1_client, spec: dict | None = None, ffmpeg: str | None = None,
+                 transport: httpx.AsyncBaseTransport | None = None) -> None:
+        spec = spec or {}
+        self.d1 = d1_client
+        self.frames_n = int(spec.get("frames", 4))
+        self.threshold = float(spec.get("threshold", 0.7))  # how sure d1 must be of a fault for a retake
+        self.checks = [c for c in spec.get("checks", list(self.CHECKS)) if c in self.CHECKS]
+        self.ffmpeg = find_ffmpeg(ffmpeg)
+        self.confirm = spec.get("confirm")  # {"url", "model", "key"?}: asked only about the faults d1 found
+        self.client = httpx.AsyncClient(timeout=httpx.Timeout(30, connect=2), transport=transport)
+
+    async def stills(self, clip_file: Path) -> list[str]:
+        """``frames_n`` frames evenly spaced over the clip, as PNG data URLs (448 px wide)."""
+        if not self.ffmpeg:
+            return []
+        probe = await asyncio.create_subprocess_exec(self.ffmpeg, "-i", str(clip_file), stdout=asyncio.subprocess.DEVNULL,
+                                                     stderr=asyncio.subprocess.PIPE)
+        _, err = await probe.communicate()
+        m = re.search(rb"Duration: (\d+):(\d+):([\d.]+)", err)
+        seconds = int(m[1]) * 3600 + int(m[2]) * 60 + float(m[3]) if m else 5.0
+        out = []
+        for i in range(self.frames_n):
+            at = seconds * (i + 0.5) / self.frames_n
+            proc = await asyncio.create_subprocess_exec(
+                self.ffmpeg, "-v", "error", "-ss", f"{at:.2f}", "-i", str(clip_file), "-frames:v", "1",
+                "-vf", "scale=448:-2", "-f", "image2pipe", "-vcodec", "png", "-",
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+            png, _ = await proc.communicate()
+            if png:
+                out.append("data:image/png;base64," + base64.b64encode(png).decode())
+        return out
+
+    async def confirmed(self, frames: list[str], faults: list[str]) -> list[str]:
+        """The faults the stronger checker agrees with (all of them when it is not set or does not answer)."""
+        if not self.confirm or not faults:
+            return faults
+        kept = []
+        for name in faults:
+            question, fault_if, _ = self.CHECKS[name]
+            content = [{"type": "text", "text": f"{self.STATE} {question} Answer yes or no only."}]
+            content += [{"type": "image_url", "image_url": {"url": f}} for f in frames]
+            headers = {"Authorization": f"Bearer {self.confirm['key']}"} if self.confirm.get("key") else {}
+            try:
+                r = await self.client.post(self.confirm["url"].rstrip("/") + "/chat/completions", headers=headers, json={
+                    "model": self.confirm.get("model", "gemma"), "max_tokens": 3, "temperature": 0,
+                    "messages": [{"role": "user", "content": content}]})
+                said = r.json()["choices"][0]["message"]["content"].strip().lower()
+            except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError):
+                kept.append(name)
+                continue
+            if said.startswith("yes") == fault_if:
+                kept.append(name)
+        return kept
+
+    async def check(self, clip_file: Path, clip: dict, run: dict) -> Verdict:
+        frames = await self.stills(clip_file)
+        if not frames:
+            return Verdict()
+        questions = {name: {"type": "noul", "instructions": self.CHECKS[name][0]} for name in self.checks}
+        answers = await self.d1.ask(self.STATE, questions, frames, timeout_s=self.d1.clip_timeout_s)
+        if not answers:
+            return Verdict()
+        notes, faults = [], []
+        for name in self.checks:
+            try:
+                p_yes = float(answers[name]["noul"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            _, fault_if, note = self.CHECKS[name]
+            p_fault = p_yes if fault_if else 1 - p_yes
+            if p_fault >= 0.5:
+                notes.append(note)
+                if p_fault >= self.threshold:
+                    faults.append(name)
+        faults = await self.confirmed(frames, faults)
+        clip["checks"] = {"by": "d1-2B" + (" + " + self.confirm.get("model", "confirm") if self.confirm else ""),
+                          "notes": notes, "faults": faults, "ms": round(self.d1.last_ms or 0)}
+        return Verdict(ok=not faults, notes=notes, retake=bool(faults))
+
+
 # ---------------------------------------------------------------------------------------------------- the host's room
 
 def free_gb() -> float | None:
@@ -410,7 +510,8 @@ class VideoService:
                     "previews": "engine" if self.renderer.previews else "progress"}
         clips = [{"index": c["index"], "beat": c.get("beat"), "prompt": c["prompt"], "seconds": c.get("seconds"),
                   "url": f"/api/video/clip/{run['id']}/{c['index']}.mp4",
-                  "poster": f"/api/video/clip/{run['id']}/{c['index']}.jpg" if c.get("poster") else None}
+                  "poster": f"/api/video/clip/{run['id']}/{c['index']}.jpg" if c.get("poster") else None,
+                  "checks": c.get("checks"), "retakes": c.get("retakes", 0)}
                  for c in run["clips"] if c.get("state") == "done"]
         current = next((c for c in reversed(run["clips"]) if c.get("state") not in ("done",)), None)
         return {"run": run["id"], "state": run["state"], "mode": run["mode"], "idea": run["idea"],

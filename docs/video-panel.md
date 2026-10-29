@@ -167,14 +167,27 @@ itself. Each turn of the loop:
    restage an earlier beat. The planner first waits up to 10 s for a quiet moment in the conversation, so a voice turn
    never queues behind it on Bolt. If the brain gives no answer, the clip carries on with the last prompt.
 2. **render**: the clip opens on the last clip's final frame (`first_frame_from`).
-3. **check**: `Checker.check(clip_file, clip, run) → Verdict(ok, notes, retake)`. The checker in this version passes
-   everything. If a verdict asks for a retake, the clip is rendered again with a new seed (`retakes`, 1 by default), and
-   its `notes` go to the planner for the next clip.
+3. **check**: `Checker.check(clip_file, clip, run) → Verdict(ok, notes, retake)`. Without a checker it passes
+   everything. With `"check": "d1"` in the `video` section and a `d1` server in the profile, **d1-2B** looks at four
+   frames spread over the clip and answers four yes/no questions in one call: the same person throughout, no hard cut,
+   the same clothes, the same place (`video.D1Checker`; `d1_check` sets `frames`, `checks`, `threshold` and
+   `confirm`). A fault it is at least `threshold` sure of (0.7 by default) is a retake; a weaker one is only a note. d1
+   misses some person swaps, so a flagged clip can be shown to a stronger vision model first (`confirm`: an
+   OpenAI-compatible URL and model, such as Gemma 4 12B), and is retaken only if it agrees. With no answer from d1 the
+   clip is kept. The panel's strip outlines a clip with findings and lists them on hover. If a verdict asks for a
+   retake, the clip is rendered again with a new seed (`retakes`, 1 by default), and its `notes` go to the planner for
+   the next clip.
+
+   Measured on a DGX Spark against our TensorFold build of d1-2B (causal reading, 3 questions, 4 frames), on 20
+   synthetic clips (generated pictures, not real footage): 11 of 12 faulty clips retaken (person swaps 5 of 6, cuts to an
+   empty scene 2 of 2, clothing colour shifts 4 of 4), 0 of 8 clean clips retaken, 137 ms median per clip (355 ms at
+   most, with other work on the GPU). In set reading (`TF_D1_ATTENTION` unset) the three questions share one pass:
+   73 ms on an idle GPU.
 4. **keep**: the clip is checkpointed, posted to the panel and joined into the film on demand.
 
 ### Next, behind the same interfaces
 
-- **Dense Cosmos checks** (a `CosmosChecker`). These follow Imagination Studio's AutoPilot (`feature/autorl-generation`:
+- **Dense Cosmos checks** (a `CosmosChecker`, beside the d1 checker above). These follow Imagination Studio's AutoPilot (`feature/autorl-generation`:
   `app/checks.py`, `app/continuity.py`) as ideas, not code. Frames would be read in windows of 2 s, three frames each,
   plus the join between clips (the last frame before beside the first frame after). Short yes/no questions would be
   built from a small continuity record: who is in the film, what they wear, the place, the era. Pass or fail would be
