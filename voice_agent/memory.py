@@ -86,6 +86,7 @@ class Memory:
         self.captioned_at = 0.0
         self.latest: tuple[float, str] | None = None  # (monotonic time it was last true, caption) of the newest caption
         self.count = 0
+        self.recall = None  # recall.Recall: each caption is also indexed by meaning
 
     def every(self, seconds: float) -> None:
         """How often to caption while the camera is on: the page's setting, 1 s to 15 minutes."""
@@ -119,6 +120,8 @@ class Memory:
                 if text:
                     self.latest = (now, text)
                     self.count += 1
+                    if self.recall:
+                        self.recall.add("seen", text)
                     await self.client.post(self.url + "/api/vision-push", json={"description": text, "source": "camera"})
             except (httpx.HTTPError, ValueError, OSError):
                 pass
@@ -181,8 +184,10 @@ class Memory:
         return f"(It is {datetime.now().strftime('%H:%M:%S')} now.)\n" + "\n".join(lines)
 
 
-def with_context(said: str, seen: str | None, earlier: str | None, user: str = "The person") -> str:
-    """Kai's layout: what the camera sees, what the log remembers and what was said, kept apart."""
+def with_context(said: str, seen: str | None, earlier: str | None, user: str = "The person",
+                 recalled: str | None = None) -> str:
+    """Kai's layout: what the camera sees, what the log remembers and what was said, kept apart; ``recalled`` is the
+    search by meaning's dated lines (recall.py), seen and said, from any day the index keeps."""
 
     parts = []
     if seen:
@@ -190,6 +195,8 @@ def with_context(said: str, seen: str | None, earlier: str | None, user: str = "
                      f"not you]\n{seen}")
     if earlier:
         parts.append(f"[Earlier observations of the user from their camera, from the continuity log]\n{earlier}")
+    if recalled:
+        parts.append(f"[Earlier, found by meaning: what the camera saw and what was said, in time order]\n{recalled}")
     if not parts:
         return said
     parts.append(f"[{user} said]\n{said}")
