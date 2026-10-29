@@ -123,7 +123,11 @@ class Brain:
     def __init__(self, spec: dict) -> None:
         self.url = spec["url"].rstrip("/") + "/chat/completions"
         self.model = spec["model"]
-        self.extra = spec.get("extra", {})
+        self.extra = dict(spec.get("extra", {}))
+        # "thinking": false sends enable_thinking false with every request: models whose chat template thinks unless
+        # told not to (Cosmos3, LFM3-VL) otherwise spend seconds reasoning before a camera answer
+        if spec.get("thinking") is False:
+            self.extra["chat_template_kwargs"] = {**self.extra.get("chat_template_kwargs", {}), "enable_thinking": False}
         self.client = httpx.AsyncClient(timeout=httpx.Timeout(120, connect=5))
 
     async def warm(self, messages: list[dict]) -> None:
@@ -164,6 +168,24 @@ WHERE = ("Someone asks about this picture: \"{q}\"\nFor each thing the question 
          "picture: on the left of the picture, on the right of the picture, or in the middle. Do not say whose left or "
          "right. One short sentence.")
 PICTURE_SIDE = re.compile(r"(?:the\s+)?(left|right)(?:\s+(?:side|half|part))?\s+of\s+the\s+(?:picture|image|frame)", re.I)
+# small camera models often answer with the side alone ("Left.", "On the right side.") or say "on the left" in a sentence
+# without "of the picture"; both are still the picture side. "the left hand", "the left of you" and the like are not.
+BARE_SIDE = re.compile(r"^\W*(?:(?:it'?s|it\s+is)\s+)?(?:(?:on|to|at)\s+)?(?:the\s+)?(left|right)(?:\s+(?:side|half|part))?\W*$", re.I)
+LOOSE_SIDE = re.compile(r"\b(?:on|to|at)\s+the\s+(left|right)(?:\s+(?:side|half|part))?\b"
+                        r"(?!\s+(?:side|half|part|hand|arm|wrist|shoulder|ear|eye|leg|foot|cheek|of)\b)", re.I)
+
+
+def picture_sides(text: str) -> str | None:
+    """The model's picture sides said as the person's own ("your left side"); None when it named no picture side."""
+
+    if PICTURE_SIDE.search(text):
+        return PICTURE_SIDE.sub(lambda m: f"your {m.group(1).lower()} side", text)
+    bare = BARE_SIDE.match(text)
+    if bare:
+        return f"On your {bare.group(1).lower()} side."
+    if LOOSE_SIDE.search(text):
+        return LOOSE_SIDE.sub(lambda m: f"on your {m.group(1).lower()} side", text)
+    return None
 
 
 async def sides(brain: "Brain", mirrored_png: str, question: str) -> str | None:
@@ -178,9 +200,7 @@ async def sides(brain: "Brain", mirrored_png: str, question: str) -> str | None:
         text = reply.json()["choices"][0]["message"]["content"].strip()
     except (httpx.HTTPError, ValueError, KeyError, IndexError):
         return None
-    if not PICTURE_SIDE.search(text):
-        return None
-    return PICTURE_SIDE.sub(lambda m: f"your {m.group(1).lower()} side", text)
+    return picture_sides(text)
 
 
 class Said:

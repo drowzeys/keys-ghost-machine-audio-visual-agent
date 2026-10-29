@@ -392,6 +392,41 @@ A task handed to Hermes: the card shows only the tool's name while it works, the
 
 <img src="docs/media/ui-hermes-card.png" width="640" alt="A Hermes task card showing terminal while working, then the answer">
 
+## LFM3-VL-2B eyes (optional, DGX Spark)
+
+[LFM3-VL-2B](https://huggingface.co/LiquidAI/LFM3-VL-2B) (Liquid AI, LFM Open License v1.0) can answer camera
+questions instead of Cosmos3-Edge. It runs on our TensorFold CUDA port (the LFM3-VL vision tower from the d1-2B port
+and LFM3's text decoder, bf16 as released), branch `lfm3-vl-cuda` of
+[drowzeys/TensorFold](https://github.com/drowzeys/TensorFold), until it is accepted upstream:
+
+```sh
+git clone -b lfm3-vl-cuda https://github.com/drowzeys/TensorFold && cd TensorFold
+zig build native -Doptimize=ReleaseFast -Dnvcc=/usr/local/cuda/bin/nvcc     # Zig 0.17.0, CUDA 13
+hf download LiquidAI/LFM3-VL-2B --local-dir ~/models/lfm3-vl-2b
+zig-out/native/bin/tensorfold-native serve ~/models/lfm3-vl-2b --name lfm3-vl-2b --host 127.0.0.1 --port 8413 \
+  --vision --no-thinking --context 8192 --prompt-cache-gib 1
+```
+
+Then use the `eyes` block of `profiles/eyes-lfm3-vl.example.json` in your profile (or `-e EYES_URL=http://127.0.0.1:8413/v1`
+in Docker). It sends `"thinking": false`, so the model answers without reasoning first, and greedy sampling. Cosmos3-Edge
+can keep writing the memory captions. About 7.3 GB of GPU memory (Cosmos3-Edge: about 3.5 GB).
+
+**Measured on a DGX Spark** through Boo's own eyes code (the eyes model built from the profile, the camera
+instruction and question as a camera turn sends them, the mirrored frame for sides), on 44 synthetic questions about
+generated pictures (36 camera questions, 8 left-or-right questions); thinking off, greedy, a quiet GPU:
+
+| | Cosmos3-Edge | LFM3-VL-2B |
+|---|---|---|
+| Right answers | 40 of 44 | 38 of 44 |
+| Clothing, held things, signs, counts, places | 36 of 36 | 36 of 36 |
+| Which hand (left or right) | 4 of 8 | 2 of 8 (it says "in the middle" for a held thing) |
+| Talks to you as "you" | 30 of 36 | 36 of 36 |
+| First word / whole answer, camera questions | 0.16 s / 0.30 s | 0.12 s / 0.34 s |
+| Side question, whole answer | 0.19 s | 0.36 s |
+
+Cosmos3-Edge's 4 of 8 sides counts its bare "Right." answers, which Boo now reads (2 of 8 before). LFM3-VL-2B gets
+every camera question right and always says "you", but it is weaker on sides and its answers are a little longer.
+
 ## What happens in a turn
 
 Every spoken turn goes through one router. Quick paths answer in the same turn; only real tasks go to the back agent.
@@ -424,7 +459,8 @@ Rules that make it behave:
 - **The person in the picture is "you".** The camera model is told the picture shows the user, never itself.
 - **Selfie left and right.** Cosmos3 was trained on first-person robot cameras: it knows which side of a picture a thing
   is on, but not your sides on a face-forward camera. So the agent mirrors the frame to your own view, asks only for
-  the picture side, and says it as your side in code.
+  the picture side, and says it as your side in code. A short answer ("Left.", "on the right") counts as the picture
+  side too; "the right hand" does not, since that is the habit the mirrored question avoids.
 - **Fingers and hands come from the hand tracker**, never the camera model, which miscounts them.
 - **The back agent gets only your words** (plus camera or hand facts when used), never the front brain's lines. A reply
   that only promises to check is sent back once to answer.
@@ -642,7 +678,9 @@ A profile names each engine and the turn timing:
   `voice_lite` changes the lite voice's settings (default: Kokoro-82M at `http://127.0.0.1:8197/v1`, voice `bf_emma`,
   no keep-warm).
 - `turn`: VAD timing (`eager_silence_ms` starts work early, `end_silence_ms` confirms the end of a turn).
-- `eyes`: the camera model; `memory`: Eyes of Kai's URL, the captioner and `interval_s`.
+- `eyes`: the camera model (its own `extra` sampling, else the brain's; `"thinking": false` sends
+  `enable_thinking: false`, which Cosmos3 and LFM3-VL need to answer at once); `memory`: Eyes of Kai's URL, the
+  captioner and `interval_s`.
 - `memory_search` (optional): an `/v1/embeddings` server for memory search by meaning; see
   [Memory search by meaning](#memory-search-by-meaning-optional).
 - `agents` and `agent`: the back agents and the default one.
@@ -697,6 +735,7 @@ The code is MIT (LICENSE). Everything below keeps its own licence.
 | espeak-ng (through phonemizer-fork and espeakng-loader) | misaki's fallback pronunciation for words its dictionary lacks | espeak-ng contributors | GPL-3.0 | [GitHub](https://github.com/espeak-ng/espeak-ng) |
 | StyleTTS 2 | The architecture Kokoro-82M is built on (with an iSTFTNet decoder) | Yinghao Aaron Li et al. | MIT | [GitHub](https://github.com/yl4579/StyleTTS2) |
 | Eyes of Kai | The continuity log: timestamped captions so Boo can answer about the past | tonyd2wild | MIT | [GitHub](https://github.com/tonyd2wild/eyes-of-kai) |
+| LFM3-VL-2B | Camera questions (optional, instead of Cosmos3-Edge), on our TensorFold CUDA port | Liquid AI | LFM Open License v1.0 (commercial use only under US$10M annual revenue) | [Hugging Face](https://huggingface.co/LiquidAI/LFM3-VL-2B) |
 | EmbeddingGemma-2 | Memory search by meaning (optional): vectors of captions and conversation lines | Google DeepMind | Apache-2.0 (model card; deployments follow the Gemma Prohibited Use Policy) | [Hugging Face](https://huggingface.co/google/embeddinggemma-2) |
 | Hermes Agent | The back agent with tools and skills, over ACP | Nous Research | see repository | [GitHub](https://github.com/NousResearch/hermes-agent) |
 | qwen-audio-agent | Design inspiration: the frontstage/backstage split (a fast voice in front, a tool-using agent behind that reports back); no code from it is used | Qwen Audio team | Apache-2.0 | [GitHub](https://github.com/QwenAudio/qwen-audio-agent) |
