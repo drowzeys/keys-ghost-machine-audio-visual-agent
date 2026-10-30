@@ -307,7 +307,8 @@ class Conversation:
 
         async def brain():
             while going():
-                await self.e.brain.warm(self.messages() + [{"role": "user", "content": "…"}])  # the turn's own prefix (its system prompt), so the turn resumes where the warm request ended
+                # the system text as the reply's request has it (date, name): the prompt cache then holds all of it
+                await self.e.brain.warm(self.messages() + [{"role": "user", "content": "…"}])
                 try:
                     await asyncio.wait_for(stop.wait(), period)
                 except asyncio.TimeoutError:
