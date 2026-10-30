@@ -667,7 +667,16 @@ ffmpeg -y -i q.wav -ac 1 -ar 16000 a.wav
 
 A profile names each engine and the turn timing:
 
-- `asr`: `parakeet-mlx` (Mac) or `nemo` (Spark) with the model id.
+- `asr`: `parakeet-mlx` (Mac) or `nemo` (Spark) with the model id. On a Mac the recognizer's MLX buffer cache is
+  capped at `mlx_cache_mb` (default 256; -1 leaves it alone): after a long utterance it otherwise keeps about 1.5 GB
+  that no later turn needs. Not on CUDA. **One Parakeet for several agents** (optional): run
+  `python -m voice_agent.asr_server --kind parakeet-mlx --model mlx-community/parakeet-tdt-0.6b-v3 --port 8192` (or
+  `--kind nemo --model nvidia/parakeet-tdt-0.6b-v3` on a Spark) and add `"url": "http://127.0.0.1:8192"` to each
+  agent's `asr`: the agents send it their utterances and keep no model of their own. An agent whose server does not
+  answer recognizes in process (its model loads on that turn) and asks the server again after `retry_s` seconds
+  (default 30); `"fallback": false` turns that off. Measured on an M5 Ultra with two agents and the same 26 synthetic
+  utterances each: 7.8 GB for two agents with their own Parakeet before the cap, 3.3 GB with the cap, 1.8 GB with
+  one shared recognizer (1.65 GB server + 0.08 GB per agent).
 - `brain`: the front model's URL, model name, system prompt and sampling.
 - `voice`: the Drama 3 URL, default voice, voices folder (for previews and descriptions) and `first_words` (the first
   spoken chunk is cut after this many words). `keep_warm: false` stops the warm-up requests (for an engine that starts
