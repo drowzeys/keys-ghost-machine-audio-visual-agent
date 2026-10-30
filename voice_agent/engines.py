@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import sys
 import time
 from contextlib import aclosing
 from typing import AsyncIterator, Callable
@@ -67,11 +68,54 @@ def _guard_nemo_nvrtc_log() -> None:
     nvrtc.nvrtcGetProgramLog = own_buffer
 
 
-class Recognizer:
-    """Text of one utterance (float32 mono at 16 kHz)."""
+def cap_mlx_cache(mb) -> None:
+    """Cap MLX's buffer cache on Apple GPUs (Metal) at ``mb`` megabytes; ``None`` or a negative value leaves it alone.
 
-    def __init__(self, spec: dict) -> None:
+    MLX keeps the buffers of finished arrays for reuse. After a long utterance Parakeet's cache holds about 1.5 GB that
+    no later call needs (measured on an M5 Ultra: a 20 s utterance, 3.15 GB footprint, 2.23 GB after clearing it). A cap
+    keeps the reuse for the usual short turns and gives the rest back. Metal only: never on MLX's CUDA backend."""
+
+    if mb is None or float(mb) < 0 or sys.platform != "darwin":
+        return
+    import mlx.core as mx
+
+    if not mx.metal.is_available():
+        return
+    setter = getattr(mx, "set_cache_limit", None) or mx.metal.set_cache_limit  # mx.metal.* before MLX 0.24
+    setter(int(float(mb) * 1024 * 1024))
+
+
+class Recognizer:
+    """Text of one utterance (float32 mono at 16 kHz).
+
+    In process by default. With ``"url"`` in the spec (``voice_agent.asr_server``), the utterance goes to that shared
+    recognizer instead, so the agents on one machine keep one copy of the model; when that server does not answer, the
+    utterance is recognized here (the model loads on the first such turn) and the server is tried again after
+    ``retry_s`` seconds. ``"fallback": false`` turns the local copy off (the turn then fails)."""
+
+    def __init__(self, spec: dict, transport: httpx.BaseTransport | None = None) -> None:
         self.kind, self.model_id = spec["kind"], spec["model"]
+        self.language = spec.get("language")
+        self.cache_mb = spec.get("mlx_cache_mb", 256)
+        self.url = (spec.get("url") or "").rstrip("/")
+        self.fallback = spec.get("fallback", True)
+        self.retry_s = float(spec.get("retry_s", 30))
+        self.model = None
+        self.failed_at = 0.0  # when the shared recognizer last failed (0: it has not)
+        self.where = "local"  # who recognized the last utterance: "shared" or "local"
+        if self.url:
+            self.remote = httpx.Client(timeout=httpx.Timeout(float(spec.get("timeout_s", 10)), connect=1.0), transport=transport)
+            try:
+                self.remote.get(self.url + "/health").raise_for_status()
+                return
+            except httpx.HTTPError as error:
+                if not self.fallback:
+                    raise RuntimeError(f"the shared recognizer at {self.url} does not answer: {error}") from error
+                print(f"asr: the shared recognizer at {self.url} does not answer ({error}); recognizing in process", flush=True)
+                self.failed_at = time.monotonic()
+        self.load()
+
+    def load(self) -> None:
         if self.kind == "parakeet-mlx":
             from parakeet_mlx import from_pretrained
             from parakeet_mlx.audio import get_logmel
@@ -89,10 +133,30 @@ class Recognizer:
             self.model = nemo_asr.models.ASRModel.from_pretrained(self.model_id).eval().cuda()
         else:
             raise ValueError(f"unknown recognizer kind {self.kind}")
-        self.language = spec.get("language")
-        self(np.zeros(SAMPLE_RATE // 2, dtype=np.float32))  # warm up: the first call compiles kernels
+        if self.kind in ("parakeet-mlx", "mlx-audio"):
+            cap_mlx_cache(self.cache_mb)
+        self.local(np.zeros(SAMPLE_RATE // 2, dtype=np.float32))  # warm up: the first call compiles kernels
 
     def __call__(self, audio: np.ndarray) -> str:
+        if self.url and (not self.failed_at or time.monotonic() - self.failed_at >= self.retry_s):
+            try:
+                answer = self.remote.post(self.url + "/v1/transcribe", content=np.ascontiguousarray(audio, dtype="<f4").tobytes(),
+                                          headers={"Content-Type": "application/octet-stream"},
+                                          params={"language": self.language} if self.language else None)
+                answer.raise_for_status()
+                self.failed_at, self.where = 0.0, "shared"
+                return str(answer.json()["text"]).strip()
+            except (httpx.HTTPError, ValueError, KeyError) as error:
+                if not self.fallback:
+                    raise
+                print(f"asr: the shared recognizer at {self.url} failed ({error}); recognizing in process", flush=True)
+                self.failed_at = time.monotonic()
+        if self.model is None:
+            self.load()
+        self.where = "local"
+        return self.local(audio)
+
+    def local(self, audio: np.ndarray) -> str:
         if self.kind == "parakeet-mlx":
             import mlx.core as mx
 
