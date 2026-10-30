@@ -100,6 +100,21 @@ below keeps its own licence.
   the open LFM3 work upstream ([ashhart/TensorFold](https://github.com/ashhart/TensorFold) #1513, #1514, #1508, and
   #1502's LFM3-VL tower on Metal). It is checked against transformers running the checkpoint's own code.
 
+## Pocket tier (optional)
+
+- **LFM3-Omni-2B** by [Liquid AI](https://huggingface.co/LiquidAI/LFM3-Omni-2B) (LFM Open License v1.0), with its
+  bundled Liquid codec: speech (and, with `pocket.vision`, the camera's picture) in, interleaved text and speech out,
+  as the Pocket tier's ears, brain and voice in one model (`voice_agent/pocket.py`); in the hybrid mode it answers small
+  talk and camera questions, and the front brain the rest. The licence allows use, modification and redistribution (with the licence and
+  notices kept); commercial use is licensed only to a company under US$10 million in annual revenue (non-profits are
+  exempt for non-commercial or research use).
+- **LFM3-Omni-2B on TensorFold Metal** (the speech encoder, the LFM3 backbone, the depth decoder and the codec in one
+  metallib, and `lfm3-omni-generate --serve` with earlier turns as text) is our port, on
+  [drowzeys/TensorFold](https://github.com/drowzeys/TensorFold) branch `lfm3-omni-metal` (from its CUDA port,
+  `lfm3-omni-cuda`), built on the d1-2B port and the open LFM3 work upstream in
+  [ashhart/TensorFold](https://github.com/ashhart/TensorFold) (#1513, #1514, #1508), with TensorFold's prefill GEMM
+  blocks for the M5 tensor unit. TensorFold by Ash Hart is Apache-2.0.
+
 ## Earlier versions
 
 Earlier versions captioned with Qwen3.5-0.8B (Qwen team, Alibaba Cloud, Apache-2.0) and answered camera questions with
