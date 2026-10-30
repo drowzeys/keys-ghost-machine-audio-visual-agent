@@ -123,6 +123,7 @@ def log(event) -> None:
 
 
 ENGINE_LABELS = {"full": "Full (Drama 3)", "lite": "Lite (Kokoro)"}
+TIME_ASKED = re.compile(r"\b(time|clock|o'clock|hour|minutes?|late|early|tonight|morning|afternoon|evening|noon|midnight|now)\b", re.I)
 MOODS = {"neutral", "happy", "excited", "curious", "thinking", "surprised", "concerned", "sad", "playful"}
 
 
@@ -360,14 +361,22 @@ class Conversation:
                 await self.send({"type": "interrupt", "why": why})
 
     def messages(self, system: str | None = None, last: str | None = None) -> list[dict]:
-        """The conversation for a brain, its system prompt carrying the local date and time (a model only knows its
-        training date); ``last`` replaces the newest user message (the words with what the camera saw around them)."""
+        """The conversation for a brain: its system prompt carries the local date, and a newest user message that asks
+        about the time carries the clock time (a model only knows its training date); ``last`` replaces the newest user
+        message (the words with what the camera saw around them)."""
 
+        # the system prompt carries the date only and the clock time goes with the newest user message when it asks
+        # about the time: a server's prompt cache keeps a conversation only up to the first token that changed, and a
+        # clock in the system prompt changed every minute (on a DGX Spark, Qwen3.8-27B's first token after a new
+        # minute ~1.0 s instead of ~0.13 s, and longer as the conversation grows)
         now = datetime.datetime.now().astimezone()
-        when = f"It is now {now:%A %-d %B %Y, %-I:%M %p} ({now.tzname()})."
+        when = f"Today is {now:%A %-d %B %Y}."
         rest = self.history[1:]
-        if last and rest and rest[-1]["role"] == "user":
-            rest = rest[:-1] + [{"role": "user", "content": last}]
+        if rest and rest[-1]["role"] == "user":
+            words = last if last else rest[-1]["content"]
+            if isinstance(words, str) and TIME_ASKED.search(words):
+                words = f"{words} (It is now {now:%-I:%M %p} {now.tzname()}.)"
+            rest = rest[:-1] + [{"role": "user", "content": words}]
         # the name goes last, after the instructions, so a rename beats what the history says ("I am Boo")
         named = (f"Your name is {self.name}. If you were called something else earlier in this conversation, that has "
                  f"changed: you are {self.name} now, and you always say so when asked.") if self.name else ""
