@@ -29,9 +29,9 @@ import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 
-from .engines import SIDES, SAMPLE_RATE, Brain, Clock, Said, sides, Recognizer, Vad, Voice, cancel, jpeg_to_png, sentences, unrepeated, wants_eyes
+from .engines import SENTENCE_END, SIDES, SAMPLE_RATE, Brain, Clock, Said, sides, Recognizer, Vad, Voice, cancel, jpeg_to_png, sentences, unrepeated, wants_eyes
 from .memory import PAST, Memory, with_context
-from . import backstage, d1, lookup, recall, replies
+from . import backstage, d1, lookup, pocket, recall, replies
 
 HERE = Path(__file__).resolve().parent
 LOGGED = {"transcript", "reply", "deep", "task", "confirm", "error", "metrics", "emotion", "repeat", "routed", "degenerate"}
@@ -130,7 +130,11 @@ class Engines:
     def __init__(self, profile: dict) -> None:
         self.profile = profile
         self.asr = Recognizer(profile["asr"])
-        self.brain = Brain(profile["brain"])
+        # Pocket (optional): one speech-to-speech model (LFM3-Omni-2B) hears each spoken turn and answers it out loud
+        # in place of brain and voice; the recognizer still writes the transcript beside it. A Pocket profile may
+        # leave out the brain (typed turns and camera questions need one)
+        self.pocket = pocket.Pocket(profile["pocket"]) if profile.get("pocket", {}).get("url") else None
+        self.brain = Brain(profile["brain"]) if profile.get("brain") or not self.pocket else None
         # the voice engine: Drama 3 ("full") by default; a profile can name Kokoro-82M there instead, or add it as
         # voice_lite, and then the page offers Full and Lite and each conversation picks one
         self.voices = {"full": Voice(profile["voice"])}
@@ -138,7 +142,7 @@ class Engines:
             self.voices["lite"] = Voice(profile["voice_lite"])
         self.voice = self.voices["full"]
         # a brain that can see (Bolt with its vision tower, on CUDA): turns about the camera go to it with the picture
-        self.eyes = Brain({**profile["brain"], **profile["eyes"]}) if profile.get("eyes") else None
+        self.eyes = Brain({**profile.get("brain", {}), **profile["eyes"]}) if profile.get("eyes") else None
         # Eyes of Kai: captions every camera frame into a timestamped log the brain can look back through
         self.memory = Memory(profile["memory"]) if profile.get("memory") else None
         # memory search by meaning (optional): captions and conversation lines embedded by an /v1/embeddings server
@@ -178,7 +182,8 @@ class Conversation:
         self.in_speech, self.voiced, self.silent = False, 0, 0
         self.reply: asyncio.Task | None = None
         self.speaking = False
-        self.history = [{"role": "system", "content": engines.profile["brain"].get("system", "You are a helpful voice assistant.")}]
+        front = engines.profile.get("brain") or engines.profile.get("pocket") or {}
+        self.history = [{"role": "system", "content": front.get("system", "You are a helpful voice assistant.")}]
         self.send_lock = asyncio.Lock()
         self.warming: asyncio.Event | None = None  # set = stop warming
         self.audio_at = 0.0  # when the microphone last sent audio
@@ -288,6 +293,8 @@ class Conversation:
         cancelling a Drama 3 stream midway slows Bolt's next first token to ~750 ms."""
 
         warm = self.e.profile.get("turn", {}).get("keep_warm", {"brain": True, "voice": True})
+        if self.e.pocket:  # Pocket answers spoken turns itself: the brain and voice sit idle, and its server takes one request at a time
+            return
         if not warm or (self.warming and not self.warming.is_set()):
             return
         period = self.e.profile.get("turn", {}).get("keep_warm_s", 0.7)
@@ -361,17 +368,18 @@ class Conversation:
                  f"changed: you are {self.name} now, and you always say so when asked.") if self.name else ""
         return [{"role": "system", "content": f"{system or self.history[0]['content']} {when} {named}".strip()}] + rest
 
-    def start_task(self, agent, text: str, last: str | None) -> None:
+    def start_task(self, agent, text: str, last: str | None, messages: list[dict] | None = None) -> None:
         # only the user's own words (with what the camera or hand tracker measured, when the turn used them): the front
         # brain's lines are guesses and stalls that the agent would copy; its own session remembers earlier tasks
         prompt = (f"{last or text}\n\n[Do it now with your tools and reply with the answer itself, never that you "
                   f"will check: nothing after this reply reaches the user.]")
-        job = asyncio.create_task(self.backstage(agent, prompt))
+        job = asyncio.create_task(self.backstage(agent, prompt, messages))
         self.tasks.add(job)
         job.add_done_callback(self.tasks.discard)
 
-    async def backstage(self, agent, prompt: str) -> None:
-        """A back agent's task: its steps go to the page as they happen, its answer is spoken once nobody is talking."""
+    async def backstage(self, agent, prompt: str, messages: list[dict] | None = None) -> None:
+        """A back agent's task: its steps go to the page as they happen, its answer is spoken once nobody is talking.
+        A direct agent (a chat model) answers ``messages``, the conversation (Pocket hands it over this way)."""
 
         task = f"t{id(prompt) % 100000}"
         await self.send({"type": "task", "id": task, "agent": agent.label, "state": "started"})
@@ -401,7 +409,10 @@ class Conversation:
 
         started = time.monotonic()
         try:
-            answer = await (agent.run(prompt, progress, confirm) if agent.kind == "acp" else agent.run(prompt, progress))
+            if agent.kind == "acp":
+                answer = await agent.run(prompt, progress, confirm)
+            else:
+                answer = backstage.speakable("".join([p async for p in agent.stream(messages or [{"role": "user", "content": prompt}])]))
         except Exception as error:
             await self.send({"type": "task", "id": task, "agent": agent.label, "state": "error", "text": str(error)[:300]})
             answer = f"Sorry, {agent.label} ran into a problem: {str(error)[:120]}"
@@ -453,6 +464,182 @@ class Conversation:
                 if self.e.recall:
                     self.e.recall.add(f"{source} said", " ".join(spoken))
 
+    def camera_live(self) -> bool:
+        return bool(self.frame) and time.monotonic() - self.frame_at < 6
+
+    def pocket_waits(self) -> bool:
+        """Whether a Pocket turn needs its words before it goes anywhere: a back agent's tool is waiting for a yes, or
+        the camera is on and the eyes (with a brain) could be the ones to answer."""
+
+        asking = bool(self.asking and not self.asking["future"].done())
+        return asking or bool(self.e.eyes and self.e.brain and self.camera_live())
+
+    def camera_question(self, text: str) -> bool:
+        """A turn for the eyes rather than Pocket (Omni cannot see): the camera is on and the words ask about it."""
+
+        return bool(self.e.eyes and self.e.brain and self.camera_live()
+                    and (wants_eyes(text) or SIDES.search(text) or HANDS.search(text.lower())))
+
+    async def pocket_turn(self, audio: np.ndarray, words: asyncio.Future, clock: Clock, heard: dict,
+                          told: bool = False) -> None:
+        """A spoken turn answered by Pocket (LFM3-Omni-2B): its streamed speech is the voice and its streamed text the
+        reply. Mood tags are read and never shown; [deep] in the reply, words that ask for the back agent, or a reply
+        that only promises to do it, hand the turn over (the agent starts once the turn was heard, and its answer is
+        spoken by the profile's voice). A cut reply goes in the history as replies.py stores one, cut where the speech
+        had got to."""
+
+        omni, agent = self.e.pocket, self.e.agents.get(self.agent)
+        system = self.messages(omni.system)[0]["content"]
+        handed, tag = [False], [""]
+        written = ""  # the reply's text so far, tags left out
+        line = ""  # the sentence being written, for the page's reply events
+        first_audio, sent_s = None, 0.0
+        finished = False
+        job = [False]  # the back agent's task was started
+
+        async def hand_over() -> None:
+            if agent and not handed[0]:
+                handed[0] = True
+                await self.emit({"type": "deep", "agent": agent.name, "label": agent.label, "kind": agent.kind})
+                clock.mark("deep_ms")
+
+        async def listen() -> None:
+            text = await asyncio.shield(words)  # stopping the turn stops this, never the recognizer's words
+            clock.mark("asr_ms")
+            if not told:
+                await self.emit({"type": "transcript", "text": text})
+            if text and agent and backstage.asked_for(text, agent):  # "ask Hermes...", a live fact: to the back agent
+                await hand_over()
+
+        listening = asyncio.create_task(listen())
+        try:
+            async with aclosing(omni.stream(audio, system, self.history[1:])) as events:
+                carry = ""
+                async for kind, value in events:
+                    if kind == "text":
+                        clock.mark("first_text_ms")
+                        carry += value
+                        if "[" in carry[carry.rfind("]") + 1:] and len(carry) - carry.rfind("[") < 24:
+                            continue  # half a tag: wait for its "]"
+                        for name in " ".join(re.findall(r"\[(\w+(?: \w+)*)\]", carry)).split():
+                            name = name.lower()
+                            if name == "deep":
+                                await hand_over()
+                            elif name in MOODS:
+                                tag[0] = f"[{name}] "
+                                await self.emit({"type": "emotion", "emotion": name})
+                        piece, carry = pocket.TAGS.sub("", carry), ""
+                        if not written:
+                            piece = piece.lstrip()
+                        written += piece
+                        line += piece
+                        while end := SENTENCE_END.search(line):
+                            said, line = line[: end.end()].strip(), line[end.end():]
+                            if said:
+                                await self.emit({"type": "reply", "text": said})
+                    elif kind == "audio":
+                        if first_audio is None:
+                            first_audio = time.monotonic()
+                            clock.mark("first_audio_ms")
+                            if not tag[0]:
+                                await self.emit({"type": "emotion", "emotion": pocket.mood_of(written)})
+                            await self.emit({"type": "audio_start", "sample_rate": omni.sample_rate})
+                        sent_s += len(value) / 2 / omni.sample_rate
+                        await self.emit(value)
+                    elif kind == "done":
+                        for key in ("first_text_ms", "first_audio_ms", "total_ms", "speech_s"):
+                            if key in value:
+                                clock.marks[f"omni_{key}"] = value[key]
+                if carry.strip():
+                    rest = pocket.TAGS.sub("", carry)
+                    written, line = written + rest, line + rest
+            if line.strip():
+                await self.emit({"type": "reply", "text": line.strip()})
+            clock.mark("done_ms")
+            try:
+                await listening  # the transcript (long done by now) may still hand the turn over
+            except Exception:
+                pass
+            if agent and not handed[0] and (backstage.promised(written.replace("\u2019", "'")) or pocket.unable(written)):
+                # "On it, ..." with no tag, or "I can't create a clip": the back agent's work
+                await hand_over()
+            if handed[0]:
+                self.pocket_job(words, heard, agent)
+                job[0] = True
+            if first_audio is not None:
+                # Omni writes a reply several times faster than it is spoken: the turn lasts while the page plays it,
+                # so talking over it still stops it (barge-in), and a cut is stored where the speech had got to
+                await asyncio.sleep(max(0.0, first_audio + sent_s - time.monotonic()))
+            finished = True
+            await self.emit({"type": "audio_end"})
+            await self.emit({"type": "metrics", "pocket": omni.model, **clock.marks})
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:  # Omni down: say so, keep listening
+            await self.emit({"type": "error", "error": f"{type(error).__name__}: {error}"})
+        finally:
+            self.speaking = False
+            listening.cancel()
+            written = written.strip()
+            if finished:
+                said = written
+            elif first_audio is not None:  # cut: as much of the text as its speech had got through
+                played = min(time.monotonic() - first_audio, sent_s)
+                spoken = pocket.heard_part(written, played)
+                said = replies.cut_reply(spoken, written) if spoken else ""
+            else:
+                said = ""
+            if handed[0] and not job[0] and heard["yes"]:  # handed over, then cut off: the task still goes ahead
+                self.pocket_job(words, heard, agent)
+            if (heard["yes"] or finished) and said:
+                self.later(self.pocket_remember(words, heard, tag[0] + said))
+
+    def later(self, work) -> None:
+        self.tasks.add(task := asyncio.create_task(work))
+        task.add_done_callback(self.tasks.discard)
+
+    async def pocket_words(self, words: asyncio.Future, heard: dict) -> str | None:
+        """A Pocket turn's words once the recognizer has them (a few ms after the reply began, so this almost never
+        waits) and the turn was heard; None when it was not: a quiet turn the person talked on through (a newer turn
+        took its place) leaves no trace."""
+
+        try:
+            text = await asyncio.shield(words)
+        except Exception:
+            return None
+        for _ in range(6000):
+            if heard["yes"]:
+                return text or None
+            if self.heard is not heard or self.closed:
+                return None
+            await asyncio.sleep(0.02)
+        return None
+
+    async def pocket_remember(self, words: asyncio.Future, heard: dict, said: str) -> None:
+        """A heard Pocket turn into the history: the person's words and what was said back."""
+
+        if not (text := await self.pocket_words(words, heard)):
+            return
+        self.history += [{"role": "user", "content": text}, {"role": "assistant", "content": said}]
+        if self.e.recall:
+            self.e.recall.add("you said", text)
+            self.e.recall.add(f"{self.name} said", replies.TAGS.sub("", said).strip())
+
+    def pocket_job(self, words: asyncio.Future, heard: dict, agent) -> None:
+        """Starts a Pocket turn's hand-over once its words are in: the back agent gets the person's own words (a
+        direct one the conversation up to them), never Pocket's "On it"."""
+
+        async def start() -> None:
+            if not (text := await self.pocket_words(words, heard)):
+                return
+            conversation = self.messages(agent.system)
+            while len(conversation) > 1 and conversation[-1]["role"] == "assistant":
+                conversation.pop()
+            if conversation[-1] != {"role": "user", "content": text}:
+                conversation.append({"role": "user", "content": text})
+            self.start_task(agent, text, None, conversation if agent.kind == "direct" else None)
+        self.later(start())
+
     async def turn(self, audio: np.ndarray | None, text: str | None) -> None:
         clock = Clock()
         speaker = self.voice  # a switch of engine mid-reply applies to the next reply (one sample rate per reply)
@@ -463,8 +650,18 @@ class Conversation:
         tag = [""]  # the mood tag, kept in the history so the brain keeps tagging
         jobs: list[asyncio.Task] = []  # the back brain, stopped with the turn
         heard = self.heard = {"yes": self.held is None}  # let_out flips it for a quiet turn
+        spoken_turn = None  # Pocket: the spoken turn, when its words were needed before it could go to Omni
         try:
-            if audio is not None:
+            if audio is not None and self.e.pocket:
+                # the recognizer runs beside Omni and is not waited for, unless its words decide the turn: a tool
+                # permission being asked, or a camera question for the eyes (only with the camera on)
+                loop = asyncio.get_running_loop()
+                words = asyncio.ensure_future(loop.run_in_executor(self.e.asr_pool, self.e.asr, audio))
+                if not self.pocket_waits():
+                    return await self.pocket_turn(audio, words, clock, heard)
+                text, spoken_turn = await words, (audio, words)
+                clock.mark("asr_ms")
+            elif audio is not None:
                 loop = asyncio.get_running_loop()
                 text = await loop.run_in_executor(self.e.asr_pool, self.e.asr, audio)
                 clock.mark("asr_ms")
@@ -484,6 +681,11 @@ class Conversation:
                 said = {"allow_once": "Okay, going ahead.", "allow_session": "Okay, I won't ask again for this task.",
                         "deny": "Okay, I told it not to."}[choice]
                 await self.say(said, self.name, "happy" if choice != "deny" else "neutral", "says")
+                return
+            if spoken_turn and not self.camera_question(text):
+                return await self.pocket_turn(*spoken_turn, clock, heard, told=True)
+            if self.e.brain is None:  # a Pocket profile without a brain: only spoken turns get an answer
+                await self.emit({"type": "error", "error": "This profile answers spoken turns only (Pocket, no text brain)."})
                 return
             self.history.append({"role": "user", "content": text})
             asked = True
@@ -741,7 +943,10 @@ def build(profile: dict) -> FastAPI:
     @app.get("/health")
     def health():
         return JSONResponse({"ok": True, "profile": profile.get("name"), "asr": profile["asr"]["model"],
-                             "brain": profile["brain"]["model"], "voice": profile["voice"]["model"],
+                             "brain": (profile.get("brain") or {}).get("model")
+                             or (profile.get("pocket") or {}).get("model", "lfm3-omni-2b") + " (Pocket)",
+                             "voice": profile["voice"]["model"],
+                             "pocket": (profile.get("pocket") or {}).get("model") if profile.get("pocket", {}).get("url") else None,
                              "voice_lite": (profile.get("voice_lite") or {}).get("model"),
                              "eyes": (profile.get("eyes") or {}).get("model"),
                              "memory_search": (profile.get("memory_search") or {}).get("model"),

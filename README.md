@@ -427,6 +427,68 @@ generated pictures (36 camera questions, 8 left-or-right questions); thinking of
 Cosmos3-Edge's 4 of 8 sides counts its bare "Right." answers, which Boo now reads (2 of 8 before). LFM3-VL-2B gets
 every camera question right and always says "you", but it is weaker on sides and its answers are a little longer.
 
+## Pocket tier: LFM3-Omni-2B, speech in and speech out (optional, Mac)
+
+For small hardware, one model can do the whole front of a turn. [LFM3-Omni-2B](https://huggingface.co/LiquidAI/LFM3-Omni-2B)
+(Liquid AI, LFM Open License v1.0) hears the spoken turn itself and answers out loud, streaming its reply as text and
+24 kHz speech together, in place of Parakeet → brain → Drama 3 or Kokoro. It runs on our TensorFold Metal port, branch
+`lfm3-omni-metal` of [drowzeys/TensorFold](https://github.com/drowzeys/TensorFold), about 4.4 GB of memory:
+
+```sh
+git clone -b lfm3-omni-metal https://github.com/drowzeys/TensorFold && cd TensorFold
+zig build lfm3-omni-generate -Doptimize=ReleaseFast     # Zig 0.17.0; the Metal toolchain (xcodebuild -downloadComponent MetalToolchain)
+hf download LiquidAI/LFM3-Omni-2B --local-dir ~/models/lfm3-omni-2b
+zig-out/bin/lfm3-omni-generate --model ~/models/lfm3-omni-2b --serve 127.0.0.1:8094 \
+  --audio-temperature 0.4 --audio-repetition-penalty 1.2
+```
+
+Then start Boo with a profile that has a `pocket` block (`profiles/pocket.example.json`):
+`python -m voice_agent.server --profile profiles/pocket.json --port 8096`. A turn with `pocket` set goes like this:
+
+- **Omni answers the spoken turn at once.** Its speech is Boo's voice (played at its own 24 kHz) and its text is the
+  reply on the page and in the history. Pocket replies come several times faster than they are spoken, so the turn
+  lasts while the page plays them, and talking over Boo still stops it (barge-in hangs up on the Omni server, which
+  stops that reply). A cut reply is stored in the history as Boo stores any cut reply (`voice_agent/replies.py`):
+  what was heard, `[interrupted]` where the speech had got to, then the rest of what was written.
+- **Parakeet still writes down what you said**, beside Omni and never waited for: the transcript on the page, the
+  conversation (sent back to Omni as text turns with every request, the last `history_turns`), and hand-overs.
+- **Hand-overs work as before.** Asking for the back agent by name or for a live fact, `[deep]` in Omni's text, a reply
+  that only says "On it, ...", or one that says it can't make or do the thing asked ("I can't create a video clip")
+  hands the turn to the back agent. Its answer is spoken by the profile's `voice` (Kokoro-82M in the example), and so
+  are Boo's fixed lines (tool permission questions); a direct back agent answers once the turn is over rather than
+  in it.
+- **Kept:** voice activity, the eager start of a turn, barge-in, mood (from tags if Omni writes them, else a face from
+  the first sentence: a question looks curious, an exclamation happy), renaming, back agents and tool permissions.
+- **Left out:** keep-warm requests (the Omni server takes one request at a time, so other conversations wait for it),
+  d1-2B routing, live-fact lookups (a live fact goes to the back agent instead), and camera memory. **Camera:** Omni
+  cannot see. With `eyes` and a `brain` in the profile and the camera on, Pocket waits for Parakeet's words, and a
+  camera question goes the usual way (the eyes model answers, the profile's voice speaks); without a brain (as in the
+  example), the camera is not used and typed turns are not answered.
+
+**Measured on an M5 Ultra** through Boo's own client (`voice_agent.bench`) with the 16 synthetic questions (macOS
+voices) the Mac Boo is measured with, two passes, while the full Boo kept running beside it. The back agent was
+unreachable, so hand-overs did no real work:
+
+| | Pocket (LFM3-Omni-2B) | Boo on the same Mac (Parakeet, Qwen3.8-27B, Drama 3) |
+|---|---|---|
+| Voice to voice, median | **0.19 s** | 0.38 s |
+| Voice to voice, p90 | **0.35 s** | 0.94 s |
+| Replies without speech | 0 of 32 | 0 of 32 |
+| Talking over Boo stops it after | 0.16–0.42 s, median 0.21 s (6 of 7; counts the 0.19 s of speech that makes a barge-in) | |
+| Front of the stack in memory | **≈ 7.8 GB**: Omni ≈ 4.4 GB, Parakeet and agent ≈ 3.5 GB (+ Kokoro ≈ 0.7 GB for back-agent lines) | ≈ 40 GB: brain ≈ 27 GB, Drama 3 ≈ 9.9 GB, Parakeet and agent ≈ 3.3 GB |
+
+Inside a turn, Omni's server sends its first speech 0.13–0.21 s after the request (median 0.20 s; 0.06 s
+measured alone on a quiet GPU with no conversation), and Parakeet's transcript, not waited for, takes about 0.11 s. Hand-overs: 9 of 16 turns a pass, 8 of the 12 studio tasks and the story idea; the misses were "add a
+slow push-in", "go back to the previous shot", an export that the speaker's pause split into two turns, and a
+question about an earlier script, which Omni answered by making something up. Omni's speech scores 4.43 UTMOS22
+(median of 16 replies on the TensorFold Metal port) against 4.36–4.52 for Kokoro and 4.54 for Drama 3, and its text
+matches its speech (1.5% WER).
+
+**What Pocket gives up:** a 2B model's answers. It knows less (it mixed up a crash zoom), makes up what it should
+hand over or look up, often says it can't do a task (Boo then hands it over), and can copy one of its earlier
+replies in a long conversation; it speaks in one voice only (no voice picker for its replies), and a back agent's
+answer comes in the profile's other voice.
+
 ## What happens in a turn
 
 Every spoken turn goes through one router. Quick paths answer in the same turn; only real tasks go to the back agent.
@@ -686,6 +748,10 @@ A profile names each engine and the turn timing:
 - `agents` and `agent`: the back agents and the default one.
 - `d1` (optional): a d1-2B server's `url`, `threshold`, `thresholds`, `timeout_ms`, `route` and `permission`
   ([d1-2B assist](#d1-2b-assist-optional-dgx-spark)).
+- `pocket` (optional): an LFM3-Omni-2B server's `url`, `model`, `system` (it should start with "Respond with
+  interleaved text and audio."), `history_turns` (default 12) and `extra` (`audio_temperature`,
+  `audio_repetition_penalty`, `max_new`); spoken turns then go to it, and `brain` may be left out
+  ([Pocket tier](#pocket-tier-lfm3-omni-2b-speech-in-and-speech-out-optional-mac)).
 
 ## Limitations
 
@@ -726,7 +792,7 @@ The code is MIT (LICENSE). Everything below keeps its own licence.
 | NeMo | Runs Parakeet on the DGX Spark | NVIDIA | Apache-2.0 | [GitHub](https://github.com/NVIDIA/NeMo) |
 | Drama 3 | The voice (speech synthesis); the 14 named voices are takes of its built-in voice | Fish Audio | Fish Audio Community License | [Hugging Face](https://huggingface.co/fishaudio/drama-3) |
 | drama-3-NVFP4-Pruned, NVFP4 CUDA fork and named voices | The 4-bit pruned Drama 3 checkpoint, the DGX Spark's Drama engine and `--voices` | plotarmordev | Fish Audio Community License (weights) · Apache-2.0 (engine) | [checkpoint](https://huggingface.co/plotarmordev/drama-3-NVFP4-Pruned) · [fork](https://github.com/plotarmordev/TensorFold) |
-| TensorFold | The engine for Bolt, Drama 3 and Cosmos3-Edge, on Metal and CUDA | Ash Hart | Apache-2.0 | [GitHub](https://github.com/ashhart/TensorFold) |
+| TensorFold | The engine for Bolt, Drama 3, Cosmos3-Edge and (on our ports) the LFM3 models, on Metal and CUDA | Ash Hart | Apache-2.0 | [GitHub](https://github.com/ashhart/TensorFold) |
 | Kokoro-82M | The lite voice (optional, instead of Drama 3) | hexgrad | Apache-2.0 | [Hugging Face](https://huggingface.co/hexgrad/Kokoro-82M) |
 | kokoro | Runs Kokoro-82M on PyTorch (DGX Spark) | hexgrad | Apache-2.0 | [GitHub](https://github.com/hexgrad/kokoro) |
 | mlx-audio | Runs Kokoro-82M on MLX (Mac); weights from `mlx-community/Kokoro-82M-bf16` | Prince Canuma (Blaizzy) | MIT | [GitHub](https://github.com/Blaizzy/mlx-audio) |
@@ -735,6 +801,7 @@ The code is MIT (LICENSE). Everything below keeps its own licence.
 | espeak-ng (through phonemizer-fork and espeakng-loader) | misaki's fallback pronunciation for words its dictionary lacks | espeak-ng contributors | GPL-3.0 | [GitHub](https://github.com/espeak-ng/espeak-ng) |
 | StyleTTS 2 | The architecture Kokoro-82M is built on (with an iSTFTNet decoder) | Yinghao Aaron Li et al. | MIT | [GitHub](https://github.com/yl4579/StyleTTS2) |
 | Eyes of Kai | The continuity log: timestamped captions so Boo can answer about the past | tonyd2wild | MIT | [GitHub](https://github.com/tonyd2wild/eyes-of-kai) |
+| LFM3-Omni-2B (with its Liquid codec) | The Pocket tier (optional): hears a spoken turn and answers out loud in one model, on our TensorFold Metal port | Liquid AI | LFM Open License v1.0 (commercial use only under US$10M annual revenue) | [Hugging Face](https://huggingface.co/LiquidAI/LFM3-Omni-2B) |
 | LFM3-VL-2B | Camera questions (optional, instead of Cosmos3-Edge), on our TensorFold CUDA port | Liquid AI | LFM Open License v1.0 (commercial use only under US$10M annual revenue) | [Hugging Face](https://huggingface.co/LiquidAI/LFM3-VL-2B) |
 | EmbeddingGemma-2 | Memory search by meaning (optional): vectors of captions and conversation lines | Google DeepMind | Apache-2.0 (model card; deployments follow the Gemma Prohibited Use Policy) | [Hugging Face](https://huggingface.co/google/embeddinggemma-2) |
 | Hermes Agent | The back agent with tools and skills, over ACP | Nous Research | see repository | [GitHub](https://github.com/NousResearch/hermes-agent) |

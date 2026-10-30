@@ -62,6 +62,8 @@ async def main() -> None:
                 while True:
                     m = await ws.recv()
                     if isinstance(m, bytes):
+                        if not got.get("ends"):  # a back agent's answer to the turn before, spoken in the gap: not this reply
+                            continue
                         got["audio_bytes"] += len(m)
                         if not first_audio.done():
                             first_audio.set_result(time.perf_counter())
