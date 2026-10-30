@@ -460,10 +460,13 @@ Then start Boo with a profile that has a `pocket` block (`profiles/pocket.exampl
 - **Kept:** voice activity, the eager start of a turn, barge-in, mood (from tags if Omni writes them, else a face from
   the first sentence: a question looks curious, an exclamation happy), renaming, back agents and tool permissions.
 - **Left out:** keep-warm requests (the Omni server takes one request at a time, so other conversations wait for it),
-  d1-2B routing, live-fact lookups (a live fact goes to the back agent instead), and camera memory. **Camera:** Omni
-  cannot see. With `eyes` and a `brain` in the profile and the camera on, Pocket waits for Parakeet's words, and a
-  camera question goes the usual way (the eyes model answers, the profile's voice speaks); without a brain (as in the
-  example), the camera is not used and typed turns are not answered.
+  d1-2B routing, live-fact lookups (a live fact goes to the back agent instead), and camera memory. **Camera:** with
+  `"vision": true` (an Omni server built with its vision tower) each turn goes with the camera's frame and Omni answers
+  camera questions itself (`vision_mirror`: the camera's view, the person's mirrored one, or `"sides"`, mirrored and
+  without the conversation for left-or-right questions). Without it, with `eyes` and a `brain` in the profile and the
+  camera on, Pocket waits for Parakeet's words, and a camera question goes the usual way (the eyes model answers, the
+  profile's voice speaks); without a brain (as in the example), the camera is not used and typed turns are not
+  answered.
 
 **Measured on an M5 Ultra** through Boo's own client (`voice_agent.bench`) with the 16 synthetic questions (macOS
 voices) the Mac Boo is measured with, two passes, while the full Boo kept running beside it. The back agent was
@@ -488,6 +491,59 @@ matches its speech (1.5% WER).
 hand over or look up, often says it can't do a task (Boo then hands it over), and can copy one of its earlier
 replies in a long conversation; it speaks in one voice only (no voice picker for its replies), and a back agent's
 answer comes in the profile's other voice.
+
+### Hybrid: Omni for small talk, the brain for the rest
+
+`"mode": "hybrid"` in the `pocket` block (with a `brain`, `profiles/pocket-hybrid.example.json`) keeps Omni's speed
+where a 2B model is enough and gives every other turn to the brain:
+
+- **Omni starts at once and is held.** Every spoken turn goes to Omni the moment it ends, its reply held back, while
+  Parakeet writes the words (about 0.1 s, about as long as Omni takes to its first audio). Small talk (every word a
+  greeting, thanks, an acknowledgement, a how-are-you or a goodbye: `pocket.small_talk`) lets Omni's reply out; a bare
+  "yes" right after Boo asked something does not (it carries the earlier turn's meaning). Anything else hangs Omni up
+  and goes to the brain, as in a Boo without Pocket: studio tasks and hand-overs (`[deep]`, "On it", asking an agent by
+  name), facts, follow-ups, the camera. `"speculate": false` asks Omni only after the words chose it (about 0.1 s
+  slower on small talk).
+- **One conversation.** Both write to the same history; Omni sees the last `history_turns` (4 in hybrid: a 2B model
+  copies its own earlier lines), the brain all of it. Omni's reply is held until its first sentence (or six words) and
+  goes to the brain instead when it repeats one of the last replies or says nothing (`pocket.repeats`,
+  `replies.degenerate`); a promise in Omni's small talk ("I'll keep at it, see you!") hands nothing over. Omni down,
+  the brain answers.
+- **One voice, nearly.** The brain's replies are spoken by the profile's `voice`. Kokoro's `af_heart` is the closest
+  stock voice to Omni's (pitch within 1.5 semitones, the nearest timbre of the 15 Kokoro voices by MFCC; `af_bella`
+  and `af_sarah` are as close by other measures), so the two models sound alike but not the same. A fast voice is done
+  long before the page has played it, so the turn lasts while the page plays and talking over Boo still stops it, and
+  a cut reply is stored where the speech had got to. The brain is kept warm while the person speaks.
+- **The camera.** With `"vision": true` (an Omni server built with its vision tower) a camera question goes to Omni
+  with the frame (a 640-wide PNG, about 300 image tokens), finger counts to the hand tracker, and with
+  `"vision_sides": "eyes"` (the default) left-or-right questions to the eyes' `sides()`; without `vision`, every
+  camera question goes to the eyes. Camera questions the eyes' word list misses ("Where am I?", "What does my sign
+  say?") are caught too (`pocket.looks`), so the brain never answers one from the conversation alone.
+
+**Measured on an M5 Ultra** through `voice_agent.bench`, synthetic voices only, while the Mac Boo and other jobs ran
+beside it (the back agent was unreachable, so hand-overs did no real work): the 16 studio questions (two passes), the
+same with 8 small-talk lines between them, a barge-in run, and the 44 synthetic camera questions of the vision
+comparison (one picture each).
+
+| | Hybrid Pocket | Pocket (Omni only) | Boo (Qwen3.8-27B; same hour) |
+|---|---|---|---|
+| Small talk, voice to voice (median / p90) | **0.23 s / 0.33 s** (Omni) | 0.19 s / 0.35 s | — |
+| Studio questions, voice to voice (median / p90) | 0.39–0.60 s / 0.62–2.5 s (brain) | 0.19 s / 0.35 s | 0.40 s / 1.4 s |
+| Studio tasks handed over (of 12 a pass) | **12, 12** | 9 | 12 |
+| Answers, 16 questions scored blind (correct / persona / nothing made up, of 32) | **30 / 30 / 30** | 9 / 6 / 23 | 29 / 29 / 30 |
+| Camera questions right (of 44) | **38** at 0.33 s (Omni sees, sides to Cosmos3) | — | 37 at 0.69 s (Cosmos3, then the brain) |
+| Talking over Boo stops it after | 0.20–0.26 s (6 of 8) | 0.16–0.42 s | |
+
+Small talk is routed to Omni 7 of 7 times it was heard, at 0.19–0.28 s; every studio question went to the brain, and
+none of Omni's small talk was handed over. Garbled questions now get a short question back instead of a guess. Omni alone sees
+faster (35 of 44 right at 0.28 s) but gets left and right wrong half the time: its which-hand answers flip with small
+changes to the prompt or the audio (identical pictures, no conversation), so those go to the eyes. Same caveats as
+above: the bench voices are macOS ones, and one of them ("Albert") is not heard as speech by the voice activity
+detector, so a few turns per run are missed.
+
+**What the hybrid gives up:** Omni's 0.19 s on every turn. A studio question now takes the brain's time (about
+twice Omni's, and the brain's first token can spike to a second or more when the Mac is busy), and the brain's
+voice is Kokoro, close to Omni's but not the same voice. Memory use is Pocket's plus the brain's.
 
 ## What happens in a turn
 
@@ -749,9 +805,12 @@ A profile names each engine and the turn timing:
 - `d1` (optional): a d1-2B server's `url`, `threshold`, `thresholds`, `timeout_ms`, `route` and `permission`
   ([d1-2B assist](#d1-2b-assist-optional-dgx-spark)).
 - `pocket` (optional): an LFM3-Omni-2B server's `url`, `model`, `system` (it should start with "Respond with
-  interleaved text and audio."), `history_turns` (default 12) and `extra` (`audio_temperature`,
+  interleaved text and audio."), `history_turns` (default 12, 4 in hybrid) and `extra` (`audio_temperature`,
   `audio_repetition_penalty`, `max_new`); spoken turns then go to it, and `brain` may be left out
-  ([Pocket tier](#pocket-tier-lfm3-omni-2b-speech-in-and-speech-out-optional-mac)).
+  ([Pocket tier](#pocket-tier-lfm3-omni-2b-speech-in-and-speech-out-optional-mac)). `mode` ("omni", the default, or
+  "hybrid": Omni for small talk, the brain for the rest), `speculate` (default true), `guard` (default true: a reply
+  that repeats an earlier one goes to the brain), `vision`, `vision_mirror`, `vision_width` and `vision_sides`
+  ([Hybrid](#hybrid-omni-for-small-talk-the-brain-for-the-rest)).
 
 ## Limitations
 

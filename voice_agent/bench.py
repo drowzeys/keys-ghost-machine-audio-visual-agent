@@ -1,14 +1,18 @@
 """Talks to the agent like a person: streams WAV files (16 kHz mono) in real time, then silence, and measures the
 voice-to-voice latency (the end of the person's speech to the first reply audio received). With --barge, it speaks the
-next utterance one second into each reply and measures how fast the agent stops.
+next utterance one second into each reply and measures how fast the agent stops. With --camera, each WAV goes with a
+picture sent as the camera's frame (as the page sends one, a JPEG) just before it is spoken.
 
     python -m voice_agent.bench ws://127.0.0.1:8095/ws asrset/u00.wav asrset/u01.wav [--barge] [--agent NAME]
+                                [--camera FRAME0.png FRAME1.png ...]
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
+import io
 import json
 import statistics
 import time
@@ -44,7 +48,10 @@ async def main() -> None:
     parser.add_argument("wavs", nargs="+")
     parser.add_argument("--barge", action="store_true")
     parser.add_argument("--agent", help="hand deep requests to this agent (e.g. a tool-free direct one) instead of the profile's")
+    parser.add_argument("--camera", nargs="+", help="one picture per WAV, sent as the camera's frame before it is spoken")
     args = parser.parse_args()
+    if args.camera and len(args.camera) != len(args.wavs):
+        parser.error("--camera takes one picture per WAV")
     results = []
     async with websockets.connect(args.url, max_size=2**24) as ws:
         assert json.loads(await ws.recv())["type"] == "ready"
@@ -85,6 +92,8 @@ async def main() -> None:
                             done.set_result(True)
 
             task = asyncio.create_task(reader())
+            if args.camera:
+                await ws.send(json.dumps({"type": "frame", "jpeg": camera_jpeg(args.camera[n])}))
             sender = asyncio.create_task(stream(ws, audio, 1.0))
             end = await sender
             try:
@@ -122,6 +131,16 @@ async def main() -> None:
     v2v = [r["voice_to_voice_ms"] for r in results if r["voice_to_voice_ms"]]
     if v2v:
         print(json.dumps({"turns": len(results), "voice_to_voice_ms_median": statistics.median(v2v), "min": min(v2v), "max": max(v2v)}))
+
+
+def camera_jpeg(path: str) -> str:
+    """A picture as the page sends the camera's frame: base64 JPEG (quality 90)."""
+
+    from PIL import Image
+
+    out = io.BytesIO()
+    Image.open(path).convert("RGB").save(out, "JPEG", quality=90)
+    return base64.b64encode(out.getvalue()).decode()
 
 
 if __name__ == "__main__":

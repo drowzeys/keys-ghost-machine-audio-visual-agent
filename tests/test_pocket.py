@@ -1,10 +1,11 @@
 """The Pocket tier (voice_agent/pocket.py and Conversation.pocket_turn) against a fake LFM3-Omni server that streams
 server-sent events over real HTTP: Omni's speech is the voice and its text the reply, the conversation goes along as
-text turns, barge-in hangs up and stores the cut reply, and [deep], asking for the agent or an "On it" hands the turn
-over."""
+text turns, barge-in hangs up and stores the cut reply, [deep], asking for the agent or an "On it" hands the turn
+over, and with pocket.vision the camera's frame goes with the turn (camera questions no longer wait for the eyes)."""
 
 import asyncio
 import base64
+import io
 import json
 import threading
 import time
@@ -144,7 +145,7 @@ class Direct:
 
 
 class Acp:
-    kind, name, label, system = "acp", "hermes", "Hermes", None
+    kind, name, label = "acp", "hermes", "Hermes"  # as backstage.Acp: no system prompt of its own
 
     def __init__(self):
         self.prompts: list[str] = []
@@ -154,19 +155,19 @@ class Acp:
         return "Rendered the fox clip."
 
 
-def conversation(url, heard="what is the meaning of life", agent=None, asr_delay=0.0):
+def conversation(url, heard="what is the meaning of life", agent=None, asr_delay=0.0, vision=None, eyes=None, brain=None):
     def asr(audio):
         time.sleep(asr_delay)
         return heard
 
     voice = Voice()
     agents = {agent.name: agent} if agent else {}
-    profile = {"pocket": {"url": url, "model": "lfm3-omni-2b", "system": "You are Boo."},
+    profile = {"pocket": {"url": url, "model": "lfm3-omni-2b", "system": "You are Boo.", **(vision or {})},
                "voice": {"url": "http://kokoro.test/v1", "model": "kokoro-82m", "voice": "bf_emma"},
                "turn": {}, "agent": agent.name if agent else None}
     engines = SimpleNamespace(profile=profile, asr=asr, asr_pool=ThreadPoolExecutor(1), voices={"full": voice},
-                              voice=voice, eyes=None, memory=None, recall=None, d1=None, agents=agents, lookup=None,
-                              pocket=pocket.Pocket(profile["pocket"]), brain=None, vad_path="")
+                              voice=voice, eyes=eyes, memory=None, recall=None, d1=None, agents=agents, lookup=None,
+                              pocket=pocket.Pocket(profile["pocket"]), brain=brain, vad_path="")
     page = Page()
     talk = server.Conversation(page, engines)
     return talk, page, voice
@@ -438,3 +439,153 @@ def test_the_turn_lasts_while_the_page_plays_it_so_barge_in_still_cuts_it(omni):
     assert page.of("interrupt") and "audio_end" not in page.kinds()
     said = talk.history[-1]["content"]
     assert said.startswith("Here is [interrupted] a long") and said.endswith("watched for.")
+
+
+# ----- the camera: Omni sees (pocket.vision) or the eyes answer -----
+
+def camera_jpeg(width=800, height=600):
+    """A synthetic camera frame as the page sends it (base64 JPEG): red on the picture's left, blue on its right."""
+
+    from PIL import Image
+
+    pixels = np.zeros((height, width, 3), dtype=np.uint8)
+    pixels[:, : width // 2] = (220, 20, 20)
+    pixels[:, width // 2:] = (20, 20, 220)
+    out = io.BytesIO()
+    Image.fromarray(pixels).save(out, "JPEG", quality=90)
+    return base64.b64encode(out.getvalue()).decode()
+
+
+def sent_picture(body):
+    from PIL import Image
+
+    assert len(body["images"]) == 1
+    return Image.open(io.BytesIO(base64.b64decode(body["images"][0])))
+
+
+class Eyes:
+    """The profile's eyes (Cosmos3 in the Mac profile): a camera model behind the brain."""
+
+    model = "cosmos3"
+
+    def __init__(self):
+        self.asked: list = []
+
+    async def stream(self, messages, image_png=None):
+        self.asked.append((messages, image_png))
+        yield "You are holding a banana."
+
+
+class Brain:
+    model = "qwen"
+
+    async def stream(self, messages, image_png=None):
+        yield "[neutral] Hello."
+
+
+def with_camera(talk):
+    talk.frame, talk.frame_at = camera_jpeg(), time.monotonic()
+
+
+def test_with_vision_the_cameras_frame_goes_with_the_turn(omni):
+    fake = omni(text=("You are holding a banana.",))
+    talk, page, _ = conversation(fake.url, heard="what am I holding", vision={"vision": True})
+    with_camera(talk)
+
+    async def go():
+        await talk.start_turn(audio=AUDIO)
+        await settle(talk)
+    asyncio.run(go())
+    picture = sent_picture(fake.bodies[0])
+    assert picture.format == "PNG" and picture.size == (640, 480)  # Boo's camera PNG, at most 640 wide
+    left, right = picture.convert("RGB").getpixel((10, 240)), picture.convert("RGB").getpixel((630, 240))
+    assert left[0] > 150 > left[2] and right[2] > 150 > right[0]  # the camera's own view: red stays on the left
+    assert pocket.VISION_NOTE in fake.bodies[0]["system"] and fake.bodies[0]["system"].startswith("You are Boo.")
+    assert page.of("metrics")[0]["camera"] == 1
+    assert [e["text"] for e in page.of("reply")] == ["You are holding a banana."]
+
+
+def test_vision_mirror_sends_the_persons_own_view(omni):
+    fake = omni()
+    talk, _, _ = conversation(fake.url, vision={"vision": True, "vision_mirror": True, "vision_width": 320})
+    with_camera(talk)
+
+    async def go():
+        await talk.start_turn(audio=AUDIO)
+        await settle(talk)
+    asyncio.run(go())
+    picture = sent_picture(fake.bodies[0]).convert("RGB")
+    assert picture.size == (320, 240)
+    assert picture.getpixel((5, 120))[2] > 150 and picture.getpixel((315, 120))[0] > 150  # mirrored: blue on the left
+
+
+def test_without_vision_or_without_the_camera_no_picture_goes(omni):
+    fake = omni()
+    talk, _, _ = conversation(fake.url)
+    with_camera(talk)  # the camera is on, but this Omni is not shown it
+    seeing, _, _ = conversation(fake.url, vision={"vision": True})  # it sees, but the camera is off
+
+    async def go():
+        await talk.start_turn(audio=AUDIO)
+        await settle(talk)
+        await seeing.start_turn(audio=AUDIO)
+        await settle(seeing)
+    asyncio.run(go())
+    assert len(fake.bodies) == 2 and all("images" not in b for b in fake.bodies)
+    assert all(pocket.VISION_NOTE not in b["system"] for b in fake.bodies)
+
+
+def test_with_vision_a_camera_question_does_not_wait_for_the_words_or_the_eyes(omni):
+    fake = omni(text=("You are holding a banana.",))
+    eyes = Eyes()
+    talk, page, voice = conversation(fake.url, heard="what am I holding", asr_delay=0.3, vision={"vision": True},
+                                     eyes=eyes, brain=Brain())
+    with_camera(talk)
+
+    async def go():
+        await talk.start_turn(audio=AUDIO)
+        await settle(talk)
+    asyncio.run(go())
+    kinds = page.kinds()
+    assert kinds.index("audio_start") < kinds.index("transcript")  # Omni answered before Parakeet's words were in
+    assert eyes.asked == [] and voice.said == [] and "images" in fake.bodies[0]
+
+
+def test_without_vision_a_camera_question_waits_for_the_words_and_goes_to_the_eyes(omni):
+    fake = omni()
+    eyes = Eyes()
+    talk, page, voice = conversation(fake.url, heard="what am I holding", eyes=eyes, brain=Brain())
+    with_camera(talk)
+
+    async def go():
+        await talk.start_turn(audio=AUDIO)
+        await settle(talk)
+    asyncio.run(go())
+    assert fake.bodies == [] and len(eyes.asked) == 1 and eyes.asked[0][1]  # the eyes got the turn and the frame
+    assert voice.said == ["You are holding a banana."]
+
+
+def test_vision_mirror_sides_waits_for_the_words_and_mirrors_only_a_left_or_right_question(omni):
+    fake = omni()
+    vision = {"vision": True, "vision_mirror": "sides"}
+    side, page, _ = conversation(fake.url, heard="Is the apple in my left hand or my right hand?", vision=vision)
+    sign, _, _ = conversation(fake.url, heard="What does my sign say?", vision=vision)
+    with_camera(side)
+    with_camera(sign)
+    earlier = [{"role": "user", "content": "Which hand is the cup in?"}, {"role": "assistant", "content": "Your right hand."}]
+    side.history += earlier
+    sign.history += earlier
+
+    async def go():
+        await side.start_turn(audio=AUDIO)
+        await settle(side)
+        await sign.start_turn(audio=AUDIO)
+        await settle(sign)
+    asyncio.run(go())
+    # the left-or-right question goes without the conversation (earlier answers pull a small model's side after them)
+    assert fake.bodies[0]["history"] == [] and fake.bodies[1]["history"] == earlier
+    kinds = page.kinds()
+    assert kinds.index("transcript") < kinds.index("audio_start")  # the words came first: they pick the side
+    mirrored, camera = (sent_picture(b).convert("RGB") for b in fake.bodies)
+    assert mirrored.getpixel((10, 240))[2] > 150  # the person's own view: blue (the picture's right) on the left
+    assert camera.getpixel((10, 240))[0] > 150  # the camera's view, so the sign reads the right way round

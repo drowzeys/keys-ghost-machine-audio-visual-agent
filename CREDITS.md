@@ -103,8 +103,9 @@ below keeps its own licence.
 ## Pocket tier (optional)
 
 - **LFM3-Omni-2B** by [Liquid AI](https://huggingface.co/LiquidAI/LFM3-Omni-2B) (LFM Open License v1.0), with its
-  bundled Liquid codec: speech in, interleaved text and speech out, as the Pocket tier's ears, brain and voice in one
-  model (`voice_agent/pocket.py`). The licence allows use, modification and redistribution (with the licence and
+  bundled Liquid codec: speech (and, with `pocket.vision`, the camera's picture) in, interleaved text and speech out,
+  as the Pocket tier's ears, brain and voice in one model (`voice_agent/pocket.py`); in the hybrid mode it answers small
+  talk and camera questions, and the front brain the rest. The licence allows use, modification and redistribution (with the licence and
   notices kept); commercial use is licensed only to a company under US$10 million in annual revenue (non-profits are
   exempt for non-commercial or research use).
 - **LFM3-Omni-2B on TensorFold Metal** (the speech encoder, the LFM3 backbone, the depth decoder and the codec in one
