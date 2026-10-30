@@ -10,6 +10,9 @@ below keeps its own licence.
 - **Parakeet TDT 0.6B v3** by NVIDIA (CC-BY-4.0): speech to text, through
   [parakeet-mlx](https://github.com/senstella/parakeet-mlx) (Apache-2.0) on the Mac and NeMo (Apache-2.0) on the DGX
   Spark.
+- **Nemotron 3.5 Transcribe 30B-A4B** (NVFP4 release) by NVIDIA (OpenMDW 1.1), served by TensorFold: optional speech
+  to text, with Parakeet taking over when it is slow or down. Its TensorFold CUDA port is by BobClawblaw (upstream
+  #1628–#1632), the NVFP4 loading ours.
 - **Nemotron 3.5 Bolt** by NVIDIA (NVIDIA Open Model License), served by TensorFold: the front brain that answers
   most turns, with mood tags for the face.
 - **Fish Audio Drama 3** by [Fish Audio](https://huggingface.co/fishaudio/drama-3) (Fish Audio Community License),

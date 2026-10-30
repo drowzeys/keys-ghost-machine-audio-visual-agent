@@ -123,3 +123,17 @@ def test_cache_cap_on_metal():
     setter = getattr(mx, "set_cache_limit", None) or mx.metal.set_cache_limit
     assert setter(0) == 256 * 1024 * 1024  # set_cache_limit returns the previous limit
     setter(256 * 1024 * 1024)
+
+
+def test_a_speech_server_falls_back_to_the_shared_parakeet_not_a_local_copy():
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "transcribe.test":
+            raise httpx.ConnectError("refused", request=request)
+        if request.url.path == "/health":
+            return httpx.Response(200, json={"ok": True})
+        return httpx.Response(200, json={"text": f" shared {len(np.frombuffer(request.content, dtype='<f4'))} "})
+
+    spec = {**SPEC, "server": {"url": "http://transcribe.test/v1", "timeout_ms": 50}}
+    r = engines.Recognizer(spec, transport=httpx.MockTransport(handle))
+    assert Fake.loads == 0  # the shared Parakeet answers its /health: no model here
+    assert r(np.zeros(32, np.float32)) == "shared 32" and r.where == "shared" and Fake.loads == 0

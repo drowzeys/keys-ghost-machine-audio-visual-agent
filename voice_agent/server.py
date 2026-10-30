@@ -886,6 +886,8 @@ class Conversation:
                 loop = asyncio.get_running_loop()
                 text = await loop.run_in_executor(self.e.asr_pool, self.e.asr, audio)
                 clock.mark("asr_ms")
+                if self.e.asr.server and self.e.asr.where != "server":
+                    clock.mark("asr_fallback_ms")  # the speech server was down, refused or slow: Parakeet answered
             if not told:
                 await self.emit({"type": "transcript", "text": text})
             if not text:
@@ -1181,7 +1183,9 @@ def build(profile: dict) -> FastAPI:
 
     @app.get("/health")
     def health():
+        server = profile["asr"].get("server") or {}
         return JSONResponse({"ok": True, "profile": profile.get("name"), "asr": profile["asr"]["model"],
+                             "asr_server": server.get("model") if server.get("url") else None,
                              "brain": (profile.get("brain") or {}).get("model")
                              or (profile.get("pocket") or {}).get("model", "lfm3-omni-2b") + " (Pocket)",
                              "voice": profile["voice"]["model"],
