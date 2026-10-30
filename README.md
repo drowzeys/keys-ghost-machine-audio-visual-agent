@@ -667,7 +667,9 @@ ffmpeg -y -i q.wav -ac 1 -ar 16000 a.wav
 
 A profile names each engine and the turn timing:
 
-- `asr`: `parakeet-mlx` (Mac) or `nemo` (Spark) with the model id.
+- `asr`: `parakeet-mlx` (Mac) or `nemo` (Spark) with the model id. `asr.server` (optional) hears through a speech
+  server instead: Nemotron 3.5 Transcribe on TensorFold (see
+  [Nemotron 3.5 Transcribe ears](#nemotron-35-transcribe-ears-optional-dgx-spark)).
 - `brain`: the front model's URL, model name, system prompt and sampling.
 - `voice`: the Drama 3 URL, default voice, voices folder (for previews and descriptions) and `first_words` (the first
   spoken chunk is cut after this many words). `keep_warm: false` stops the warm-up requests (for an engine that starts
@@ -686,6 +688,44 @@ A profile names each engine and the turn timing:
 - `agents` and `agent`: the back agents and the default one.
 - `d1` (optional): a d1-2B server's `url`, `threshold`, `thresholds`, `timeout_ms`, `route` and `permission`
   ([d1-2B assist](#d1-2b-assist-optional-dgx-spark)).
+
+## Nemotron 3.5 Transcribe ears (optional, DGX Spark)
+
+Boo can hear through [Nemotron 3.5 Transcribe](https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Transcribe-30B-A4B-NVFP4)
+(NVFP4 release) served by TensorFold's native CUDA engine, with Parakeet kept loaded behind it. Add `server` to the
+profile's `asr`:
+
+```json
+"asr": {
+  "kind": "nemo", "model": "nvidia/parakeet-tdt-0.6b-v3",
+  "server": {"url": "http://127.0.0.1:8601/v1", "model": "transcribe", "timeout_ms": 1500}
+}
+```
+
+In Docker, `-e ASR_URL=http://127.0.0.1:8601/v1` (and `ASR_MODEL`, `ASR_TIMEOUT_MS`) does the same.
+
+- Each utterance goes to the server as one 16 kHz WAV (`input_audio`), greedy, thinking off, with the model card's
+  readable-text instruction (`prompt` replaces it; the card's form with `Context terms: ...` adds names).
+- **Parakeet takes over** when the server refuses the connection, answers with an error, or misses `timeout_ms`; after
+  a refused connection or two misses in a row it is skipped for `retry_s` seconds (default 30). So you can stop the
+  Transcribe server while the GPU is busy (a long render) and Boo keeps hearing through Parakeet.
+- **Serve it** from a TensorFold build with the NVFP4 release (our branch `transcribe-nvfp4`, not yet upstream):
+  `tensorfold-native serve NVIDIA-Nemotron-3.5-Transcribe-30B-A4B-NVFP4 --name transcribe --port 8601 --no-thinking
+  --context 4096 --parallel 1 --prompt-cache-gib 0` (about 21 GB; `--no-drafts` saves about 1 GB more but answers
+  about 100 ms slower).
+
+Measured on one DGX Spark with a test Boo (Qwen3.8-27B brain, Kokoro Lite voice), 16 synthetic utterances of 2–7 s
+(macOS voices), two passes each:
+
+| | Parakeet v3 | Transcribe NVFP4 |
+|---|---|---|
+| Speech recognition in the turn, median | 38–60 ms | 222–225 ms |
+| Voice-to-voice, median | 0.80–0.81 s | 1.04–1.14 s |
+| WER on the 16 utterances, raw / numbers normalised | 7.9% / 3.6% | 3.0% / 3.1% |
+| Its own memory | ≈ 5 GB (NeMo) | ≈ 21 GB, plus Parakeet's |
+
+Transcribe hears names and spelled-out numbers better ("Tanaka", "nine by sixteen", "ProRes") but adds about 0.2 s
+to every turn, so Parakeet stays the default.
 
 ## Limitations
 
@@ -722,6 +762,7 @@ The code is MIT (LICENSE). Everything below keeps its own licence.
 | Nemotron 3.5 Bolt | The front brain: answers most turns, with mood tags for the face | NVIDIA | NVIDIA Open Model License | [Hugging Face](https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB) |
 | Cosmos3-Edge | Camera questions and memory captions (its reasoner tower) | NVIDIA | OpenMDW 1.1 | [Hugging Face](https://huggingface.co/nvidia/Cosmos3-Edge) |
 | Parakeet TDT 0.6B v3 | Speech to text | NVIDIA | CC-BY-4.0 | [Hugging Face](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3) |
+| Nemotron 3.5 Transcribe 30B-A4B (NVFP4) | Speech to text through a TensorFold server (optional), Parakeet behind it | NVIDIA | OpenMDW 1.1 | [Hugging Face](https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Transcribe-30B-A4B-NVFP4) |
 | parakeet-mlx | Runs Parakeet on the Mac | senstella | Apache-2.0 | [GitHub](https://github.com/senstella/parakeet-mlx) |
 | NeMo | Runs Parakeet on the DGX Spark | NVIDIA | Apache-2.0 | [GitHub](https://github.com/NVIDIA/NeMo) |
 | Drama 3 | The voice (speech synthesis); the 14 named voices are takes of its built-in voice | Fish Audio | Fish Audio Community License | [Hugging Face](https://huggingface.co/fishaudio/drama-3) |

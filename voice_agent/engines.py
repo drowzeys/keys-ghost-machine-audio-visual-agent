@@ -1,12 +1,15 @@
-"""The three engines a turn goes through: speech recognition (Parakeet or Nemotron ASR), the brain (Nemotron 3.5 Bolt
+"""The three engines a turn goes through: speech recognition (Parakeet, or Nemotron 3.5 Transcribe on TensorFold with
+Parakeet behind it), the brain (Nemotron 3.5 Bolt
 on TensorFold, OpenAI-compatible chat) and the voice (Fish Audio Drama 3 on TensorFold, /v1/audio/speech streamed as
 PCM). Each is chosen by the profile (profiles/*.json), so the same agent runs on a Mac and on a DGX Spark."""
 
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import re
+import struct
 import time
 from contextlib import aclosing
 from typing import AsyncIterator, Callable
@@ -67,10 +70,82 @@ def _guard_nemo_nvrtc_log() -> None:
     nvrtc.nvrtcGetProgramLog = own_buffer
 
 
-class Recognizer:
-    """Text of one utterance (float32 mono at 16 kHz)."""
+# the model card's prompt for readable text: without a transcription instruction this size of speech LLM answers a spoken
+# request ("Give me a logline for...") instead of writing it down
+TRANSCRIBE_PROMPT = ("Audio transcription. Language: as spoken. Wording: omit fillers and accidental repetitions; keep the "
+                     "remaining spoken wording unchanged. Formatting: punctuation and capitalization. Output: transcript only.")
 
-    def __init__(self, spec: dict) -> None:
+
+def wav_bytes(audio: np.ndarray) -> bytes:
+    """A 16-bit PCM WAV file (mono, 16 kHz) of float32 samples."""
+    pcm = np.round(np.clip(audio, -1, 1) * 32767).astype("<i2").tobytes()
+    fmt = struct.pack("<IHHIIHH", 16, 1, 1, SAMPLE_RATE, SAMPLE_RATE * 2, 2, 16)
+    return b"RIFF" + struct.pack("<I", 36 + len(pcm)) + b"WAVEfmt " + fmt + b"data" + struct.pack("<I", len(pcm)) + pcm
+
+
+class SpeechServer:
+    """Text of one utterance from an OpenAI-compatible chat server that takes audio as input_audio parts: Nemotron 3.5
+    Transcribe on TensorFold. None when it is down, refuses or misses its deadline (timeout_ms), so the caller falls
+    back; after a refused connection, or two misses in a row, it is skipped for retry_s seconds."""
+
+    def __init__(self, spec: dict, transport: httpx.BaseTransport | None = None, clock: Callable[[], float] = time.monotonic) -> None:
+        self.url = spec["url"].rstrip("/") + "/chat/completions"
+        self.model = spec.get("model", "transcribe")
+        self.timeout = spec.get("timeout_ms", 1500) / 1000
+        self.prompt = spec.get("prompt", TRANSCRIBE_PROMPT)
+        self.retry_s = spec.get("retry_s", 30)
+        self.max_tokens = spec.get("max_tokens", 256)
+        self.client = httpx.Client(transport=transport, timeout=httpx.Timeout(self.timeout, connect=min(self.timeout, 1.0)))
+        self.clock = clock
+        self.down_until = 0.0
+        self.misses = 0
+        self.last_error: str | None = None
+
+    def _down(self, why: str) -> None:
+        self.last_error = why
+        self.down_until = self.clock() + self.retry_s
+
+    def __call__(self, audio: np.ndarray) -> str | None:
+        if self.clock() < self.down_until:
+            return None
+        body = {"model": self.model, "temperature": 0, "max_tokens": self.max_tokens,
+                "chat_template_kwargs": {"enable_thinking": False},
+                "messages": [{"role": "user", "content": [
+                    {"type": "text", "text": self.prompt},
+                    {"type": "input_audio", "input_audio": {"data": base64.b64encode(wav_bytes(audio)).decode(), "format": "wav"}}]}]}
+        try:
+            reply = self.client.post(self.url, json=body)
+        except httpx.TimeoutException:
+            self.misses += 1
+            self.last_error = "timeout"
+            if self.misses >= 2:
+                self._down("timeout twice")
+            return None
+        except httpx.HTTPError as e:  # refused, reset: the server is down or restarting
+            self._down(type(e).__name__)
+            return None
+        if reply.status_code != 200:
+            self.last_error = f"HTTP {reply.status_code}"
+            if reply.status_code >= 500:
+                self._down(self.last_error)
+            return None
+        try:
+            text = reply.json()["choices"][0]["message"]["content"]
+        except (ValueError, KeyError, IndexError, TypeError):
+            self.last_error = "bad reply"
+            return None
+        self.misses = 0
+        self.last_error = None
+        return (text or "").strip()
+
+
+class Recognizer:
+    """Text of one utterance (float32 mono at 16 kHz): from the profile's speech server when it has one and it answers
+    in time, else from the local recognizer (Parakeet), which is always loaded."""
+
+    def __init__(self, spec: dict, transport: httpx.BaseTransport | None = None) -> None:
+        self.server = SpeechServer(spec["server"], transport) if spec.get("server", {}).get("url") else None
+        self.last = None  # which recognizer gave the last text: "server" or "local"
         self.kind, self.model_id = spec["kind"], spec["model"]
         if self.kind == "parakeet-mlx":
             from parakeet_mlx import from_pretrained
@@ -90,9 +165,20 @@ class Recognizer:
         else:
             raise ValueError(f"unknown recognizer kind {self.kind}")
         self.language = spec.get("language")
-        self(np.zeros(SAMPLE_RATE // 2, dtype=np.float32))  # warm up: the first call compiles kernels
+        self(np.zeros(SAMPLE_RATE // 2, dtype=np.float32))  # warm up: the first call compiles kernels (both recognizers)
+        if self.server:
+            self.local(np.zeros(SAMPLE_RATE // 2, dtype=np.float32))
 
     def __call__(self, audio: np.ndarray) -> str:
+        if self.server:
+            text = self.server(audio)
+            if text is not None:
+                self.last = "server"
+                return text
+        self.last = "local"
+        return self.local(audio)
+
+    def local(self, audio: np.ndarray) -> str:
         if self.kind == "parakeet-mlx":
             import mlx.core as mx
 

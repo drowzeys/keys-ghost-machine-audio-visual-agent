@@ -24,7 +24,8 @@ free memory, or about 48 GB with the lite voice (see the main README), and the w
 | `/models/hf-cache` | Hugging Face cache; Parakeet v3 (and Kokoro-82M for the lite voice) download here on first start | — |
 
 A model folder that is not mounted is skipped. Point at a server elsewhere instead with `BOLT_URL`, `DRAMA_URL` or
-`COSMOS_URL` (OpenAI-compatible base URLs ending in `/v1`).
+`COSMOS_URL` (OpenAI-compatible base URLs ending in `/v1`). `ASR_URL` (with `ASR_MODEL`, `ASR_TIMEOUT_MS`) hears through a
+Nemotron 3.5 Transcribe server, with Parakeet taking over when it is slow or down (see the main README).
 
 ## Run
 

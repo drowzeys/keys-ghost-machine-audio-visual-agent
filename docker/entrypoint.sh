@@ -5,6 +5,8 @@
 #   /models/cosmos3  Cosmos3-Edge converted with tools/cosmos3_edge_to_mlx.py  -> keys build (Cosmos3 on CUDA)
 # D1_URL (a d1-2B TensorFold server's address) turns on the d1 assist (D1_THRESHOLD, D1_TIMEOUT_MS; README).
 # EYES_URL (+ EYES_MODEL) sends camera questions to another vision server, such as LFM3-VL-2B on TensorFold (README).
+# ASR_URL (+ ASR_MODEL, ASR_TIMEOUT_MS) hears through a TensorFold speech server, Nemotron 3.5 Transcribe, with Parakeet
+# taking over when it is slow or down (README).
 # A model whose folder is missing is skipped; its URL can point at another server instead (BOLT_URL, DRAMA_URL,
 # COSMOS_URL). KAI=1 also starts Eyes of Kai for camera memory. HERMES_CMD (e.g. "ssh host hermes acp") or
 # DEEP_URL + DEEP_MODEL add a back agent. VOICE_ENGINE=lite speaks with Kokoro-82M instead of Drama 3 (no /models/drama
@@ -90,6 +92,9 @@ p["agent"] = next(iter(agents), None)
 if os.environ.get("D1_URL"):  # d1-2B assist (optional): routes turns the patterns miss, reads permission replies
     p["d1"] = {"url": os.environ["D1_URL"], "threshold": float(os.environ.get("D1_THRESHOLD", "0.8")),
                "timeout_ms": float(os.environ.get("D1_TIMEOUT_MS", "60"))}
+if os.environ.get("ASR_URL"):  # Nemotron 3.5 Transcribe on TensorFold; Parakeet stays loaded and takes over
+    p["asr"]["server"] = {"url": os.environ["ASR_URL"], "model": os.environ.get("ASR_MODEL", "transcribe"),
+                          "timeout_ms": float(os.environ.get("ASR_TIMEOUT_MS", "1500"))}
 json.dump(p, open("/tmp/boo-profile.json", "w"), indent=2)
 PY
 echo "[boo] agent on 0.0.0.0:$BOO_PORT"
