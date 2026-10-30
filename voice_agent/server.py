@@ -468,7 +468,7 @@ class Conversation:
                 loop = asyncio.get_running_loop()
                 text = await loop.run_in_executor(self.e.asr_pool, self.e.asr, audio)
                 clock.mark("asr_ms")
-                if self.e.asr.server and self.e.asr.last == "local":
+                if self.e.asr.server and self.e.asr.where != "server":
                     clock.mark("asr_fallback_ms")  # the speech server was down, refused or slow: Parakeet answered
             await self.emit({"type": "transcript", "text": text})
             if not text:

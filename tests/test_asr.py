@@ -36,7 +36,8 @@ class Local(Recognizer):
     """The Recognizer's choice between server and local, with a local recognizer that loads no model."""
 
     def __init__(self, server, text="local words"):
-        self.server, self.last, self.text, self.calls = server, None, text, 0
+        self.server, self.where, self.text, self.calls = server, None, text, 0
+        self.url, self.model = "", object()  # no shared Parakeet; the local one is "loaded"
 
     def local(self, audio):
         self.calls += 1
@@ -77,12 +78,12 @@ def test_a_profile_prompt_replaces_the_default():
 
 def test_server_text_is_used_and_the_local_recognizer_is_not_called():
     r = Local(SpeechServer(SPEC, fake("Turn the music down.")))
-    assert r(AUDIO) == "Turn the music down." and r.last == "server" and r.calls == 0
+    assert r(AUDIO) == "Turn the music down." and r.where == "server" and r.calls == 0
 
 
 def test_without_a_server_the_local_recognizer_answers():
     r = Local(None)
-    assert r(AUDIO) == "local words" and r.last == "local"
+    assert r(AUDIO) == "local words" and r.where == "local"
 
 
 def test_a_refused_connection_falls_back_and_skips_the_server_for_retry_s():
@@ -90,11 +91,11 @@ def test_a_refused_connection_falls_back_and_skips_the_server_for_retry_s():
     clock = Clock()
     s = SpeechServer({**SPEC, "retry_s": 30}, fake(fail=httpx.ConnectError("refused"), seen=seen), clock=clock)
     r = Local(s)
-    assert r(AUDIO) == "local words" and r.last == "local"
+    assert r(AUDIO) == "local words" and r.where == "local"
     assert r(AUDIO) == "local words" and len(seen) == 1  # skipped: no second request while it is down
     clock.t += 31
     s.client = httpx.Client(transport=fake("Back again."))
-    assert r(AUDIO) == "Back again." and r.last == "server"
+    assert r(AUDIO) == "Back again." and r.where == "server"
 
 
 def test_a_slow_server_falls_back_and_two_misses_in_a_row_skip_it():
@@ -124,10 +125,10 @@ def test_errors_and_bad_replies_fall_back():
         clock = Clock()
         s = SpeechServer(SPEC, transport, clock=clock)
         r = Local(s)
-        assert r(AUDIO) == "local words" and r.last == "local"
+        assert r(AUDIO) == "local words" and r.where == "local"
         assert (s.down_until > clock.t) == down
 
 
 def test_silence_from_the_server_is_an_empty_transcript_not_a_fallback():
     r = Local(SpeechServer(SPEC, fake("")))
-    assert r(AUDIO) == "" and r.last == "server" and r.calls == 0
+    assert r(AUDIO) == "" and r.where == "server" and r.calls == 0
