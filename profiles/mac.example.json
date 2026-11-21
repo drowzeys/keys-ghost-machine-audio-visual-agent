@@ -1,13 +1,23 @@
 {
   "name": "mac",
+  "platform": "mac",
+  "studio": {
+    "src": "~/ghost-studio/studio-src",
+    "home": "~/ghost-studio/home",
+    "prefix": "~/.local/opt/tensorfold-studio",
+    "port": 7890,
+    "mode": "managed",
+    "start_at_launch": true,
+    "_note": "the headless Imagination Studio on the Mac (its own Zig + Metal FastH3, MLX where that cannot run); not measured through Ghost Studio yet"
+  },
   "asr": {
     "kind": "parakeet-mlx",
     "model": "mlx-community/parakeet-tdt-0.6b-v3"
   },
   "brain": {
-    "url": "http://127.0.0.1:8091/v1",
-    "model": "nvidia-nemotron-3.5-bolt",
-    "system": "You are a friendly voice assistant. You are speaking out loud: answer in one to three short spoken sentences, plain words, no lists, no markdown, no emoji. If you did not catch something, ask. Start every reply with your mood in square brackets, one of [neutral] [happy] [excited] [curious] [thinking] [surprised] [concerned] [sad] [playful], then the words you say. You have a back agent with tools and skills. Add [deep] after the mood, and say only one short sentence that you are on it, when the request needs: doing something on the computer (checking status, files, messages, searching the web, reminders), up-to-date facts, careful thought, planning, a story or script, maths, code, or more than three sentences. Never say you cannot do something the back agent could do; hand it over instead.",
+    "url": "http://127.0.0.1:8093/v1",
+    "model": "qwen38-a",
+    "system": "You are a friendly voice assistant. You are speaking out loud: answer in one to three short spoken sentences, plain words, no lists, no markdown, no emoji. If you did not catch something, ask. Start every reply with your mood in square brackets, one of [neutral] [happy] [excited] [curious] [thinking] [surprised] [concerned] [sad] [playful], then the words you say. You have a back agent with tools and skills. Add [deep] after the mood, and say only one short sentence that you are on it, when the request needs: doing something on the computer (checking status, files, messages, searching the web, reminders), up-to-date facts, careful thought, planning, a story or script, maths, code, or more than three sentences. Never say you cannot do something the back agent could do; hand it over instead. If a request sounds misheard or contradicts itself, do not refuse it or hand it over yet: say what you think was meant and ask one short question to confirm; once it is clear, or the person corrects you, hand it over. If a report in this conversation already answers the question, answer from it yourself instead of handing it over again; anything else that needs the computer or the studio still gets [deep].",
     "extra": {
       "max_tokens": 200,
       "temperature": 0.7,
@@ -71,5 +81,253 @@
       }
     }
   },
-  "agent": "hermes"
+  "agent": "hermes",
+  "voice_lite": {
+    "url": "http://127.0.0.1:8197/v1",
+    "model": "kokoro-82m",
+    "sample_rate": 24000,
+    "chunks": {
+      "first_words": 5
+    },
+    "voice": "bf_emma",
+    "keep_warm": false
+  },
+  "voice_engine": "lite",
+  "engines": {
+    "qwen": {
+      "role": "brain",
+      "label": "Qwen3.8-27B MLX 4-bit + DFlash2 (TensorFold Metal)",
+      "mode": "managed",
+      "port": 8093,
+      "argv": [
+        "~/gma-engines/tensorfold/bin/tensorfold-native",
+        "serve",
+        "~/gma-models/qwen38-27b-mlx4",
+        "--drafter",
+        "~/gma-models/qwen38-27b-dflash2",
+        "--name",
+        "qwen38-a",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "{port}",
+        "--no-thinking",
+        "--context",
+        "16384",
+        "--parallel",
+        "2",
+        "--prompt-cache-gib",
+        "8",
+        "--no-update-check"
+      ],
+      "need_gb": 30,
+      "resident_gb": 22,
+      "load_s": 20,
+      "idle_s": "never",
+      "guard_gb": 16,
+      "_note": "the voice brain and AutoPilot's Director (the brain-quality bake-off); Bolt stays selectable: point brain at :8091 and put \"bolt\" back in the schedules; --context 16384 holds the largest prompts seen (3.6k voice, ~5.2k director); an 8 GiB prompt cache matched 48 GiB on a mixed voice + Director bench (a kept state is about 0.5 GiB) and holds 34-43 GB less"
+    },
+    "bolt": {
+      "role": "brain",
+      "label": "Nemotron 3.5 Bolt (TensorFold Metal)",
+      "mode": "managed",
+      "port": 8091,
+      "argv": [
+        "~/gma-engines/keys-tensorfold/scripts/serve-bolt.sh"
+      ],
+      "env": {
+        "MODEL": "~/gma-models/bolt",
+        "PORT": "8091",
+        "CONTEXT": "65536",
+        "PARALLEL": "2"
+      },
+      "need_gb": 40,
+      "resident_gb": 28,
+      "load_s": 40,
+      "idle_s": 600,
+      "guard_gb": 16
+    },
+    "drama3": {
+      "role": "voice",
+      "label": "Fish Audio Drama 3 (TensorFold Metal)",
+      "mode": "managed",
+      "port": 8098,
+      "argv": [
+        "~/gma-engines/keys-tensorfold/scripts/serve-drama.sh"
+      ],
+      "env": {
+        "MODEL": "~/gma-models/drama",
+        "VOICES": "~/voices/mac",
+        "VOICE": "vesper",
+        "PORT": "8098"
+      },
+      "need_gb": 56,
+      "resident_gb": 50,
+      "load_s": 30,
+      "idle_s": "never",
+      "guard_gb": 16
+    },
+    "kokoro": {
+      "role": "voice",
+      "label": "Kokoro-82M (MLX)",
+      "mode": "managed",
+      "port": 8197,
+      "argv": [
+        "~/gma-engines/kokoro-venv/bin/python",
+        "-m",
+        "voice_agent.kokoro_server",
+        "--backend",
+        "mlx",
+        "--port",
+        "{port}"
+      ],
+      "cwd": "{repo}",
+      "need_gb": 3,
+      "resident_gb": 2,
+      "load_s": 10,
+      "idle_s": "never"
+    },
+    "cosmos": {
+      "role": "vision",
+      "label": "Cosmos3-Edge reasoner (TensorFold MLX 8-bit)",
+      "mode": "managed",
+      "port": 8099,
+      "argv": [
+        "~/gma-engines/keys-tensorfold/scripts/serve-cosmos.sh"
+      ],
+      "env": {
+        "MODEL": "~/gma-models/cosmos3-tf",
+        "PORT": "8099"
+      },
+      "need_gb": 14,
+      "resident_gb": 10,
+      "load_s": 20,
+      "idle_s": 900
+    },
+    "asr": {
+      "role": "asr",
+      "label": "Parakeet TDT 0.6B v3 (parakeet-mlx, in process)",
+      "mode": "inprocess",
+      "resident_gb": 2.5
+    }
+  },
+  "governor": {
+    "floor_gb": 24,
+    "default_schedule": "live",
+    "schedules": {
+      "live": {
+        "label": "live (everything stays: a 256 GB Mac)",
+        "render": {
+          "kind": "video"
+        },
+        "keep": [
+          "qwen",
+          "kokoro",
+          "cosmos",
+          "asr"
+        ]
+      },
+      "sharp": {
+        "label": "sharp (brain evicted)",
+        "render": {
+          "kind": "video"
+        },
+        "keep": [
+          "kokoro",
+          "asr"
+        ]
+      },
+      "keyframe": {
+        "label": "keyframe (everything stays)",
+        "render": {
+          "kind": "keyframe"
+        },
+        "keep": [
+          "qwen",
+          "kokoro",
+          "cosmos",
+          "asr"
+        ]
+      },
+      "audio": {
+        "label": "the film's sound (everything stays: a 256 GB Mac)",
+        "render": {
+          "need_gb": 52,
+          "error_gb": 4
+        },
+        "keep": [
+          "qwen",
+          "kokoro",
+          "cosmos",
+          "asr"
+        ]
+      }
+    },
+    "renderer": {
+      "picture": "auto",
+      "edit_picture": "auto",
+      "width": 864,
+      "height": 480,
+      "steps": 8,
+      "dir": "~/ghost-studio/home/ghost/renders",
+      "pause_for_voice": false
+    }
+  },
+  "video": {
+    "renderer": "studio-headless",
+    "keyframe": true,
+    "seconds": 5,
+    "max_clips": 6,
+    "dir": "~/ghost-studio/home/ghost/video"
+  },
+  "autopilot": {
+    "judge": "d1",
+    "judge_choices": {
+      "d1": {
+        "engine": "d1",
+        "url": "http://127.0.0.1:8412",
+        "_note": "d1-2B on TensorFold Metal (drowzeys/TensorFold lfm3-vl-metal), a persistent server outside this app: launchd ai.keys.d1, ~5 GB"
+      },
+      "eyes": {
+        "engine": "eyes",
+        "_note": "the older path: the vision model of \"eyes\" (Gemma 4 12B mlx-vlm) judges with its watcher, checklist and dense windows; add a gemma engine and put it in the keyframe schedule's keep"
+      }
+    },
+    "eyes": "gemma",
+    "eyes_choices": {
+      "gemma": {
+        "engine": "gemma",
+        "url": "http://127.0.0.1:8311/v1",
+        "model": "mlx-community/gemma-4-12B-it-qat-mxfp4"
+      },
+      "cosmos": {
+        "engine": "cosmos",
+        "url": "http://127.0.0.1:8099/v1",
+        "model": "cosmos3"
+      }
+    },
+    "ears": {
+      "kind": "auto"
+    },
+    "director": "qwen",
+    "director_choices": {
+      "qwen": {
+        "engine": "qwen",
+        "url": "http://127.0.0.1:8093/v1",
+        "model": "qwen38-a"
+      },
+      "bolt": {
+        "engine": "bolt",
+        "url": "http://127.0.0.1:8091/v1",
+        "model": "nvidia-nemotron-3.5-bolt"
+      }
+    },
+    "settings": {
+      "seconds": 10,
+      "segments": 3,
+      "think_tokens": 4096,
+      "retakes": 2,
+      "keyframes": "on"
+    }
+  }
 }

@@ -20,20 +20,25 @@ import os
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import aclosing
+from contextlib import aclosing, asynccontextmanager
 from pathlib import Path
 
 import numpy as np
 import httpx
 import uvicorn
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 
 from .engines import SIDES, SAMPLE_RATE, Brain, Clock, Said, sides, Recognizer, Vad, Voice, cancel, jpeg_to_png, sentences, unrepeated, wants_eyes
 from .memory import Memory, with_context
-from . import backstage, lookup
+from . import backstage, lookup, video
+from gm_core.engine import Refusal
+from gma.brain import make_brains
+from gma.registry import engine_for_url
+from gma.supervisor import Supervisor
 
 HERE = Path(__file__).resolve().parent
+CLIPPED_WORDS = 6  # a reply cut off before this many words is left out of the history (the brain copies clipped lines)
 LOGGED = {"transcript", "reply", "deep", "task", "confirm", "error", "metrics", "emotion", "repeat"}
 
 
@@ -122,6 +127,11 @@ def log(event) -> None:
         print(time.strftime("%H:%M:%S"), json.dumps({k: (v[:200] if isinstance(v, str) else v) for k, v in event.items()}), flush=True)
 
 
+# added to the front brain's instructions when the profile has the video panel (unless they already speak of it)
+VIDEO_NOTE = ("You can make videos: they appear in the video panel beside you. For any request to make, generate, "
+              "create or show a video, clip or movie, the video agent makes it; say one short line that you are on it and "
+              "never say you can't.")
+
 ENGINE_LABELS = {"full": "Full (Drama 3)", "lite": "Lite (Kokoro)"}
 MOODS = {"neutral", "happy", "excited", "curious", "thinking", "surprised", "concerned", "sad", "playful"}
 
@@ -129,26 +139,116 @@ MOODS = {"neutral", "happy", "excited", "curious", "thinking", "surprised", "con
 class Engines:
     def __init__(self, profile: dict) -> None:
         self.profile = profile
+        # the supervisor (gma/): the engine registry (start, leash, health, load on demand, idle out, or adopt the
+        # servers already running), the memory governor and the brain lanes
+        self.supervisor = Supervisor(profile, busy=self.busy)
+        self.registry, self.governor, self.lanes = self.supervisor.registry, self.supervisor.governor, self.supervisor.lanes
+        self.asr_pool = ThreadPoolExecutor(1, thread_name_prefix="asr")  # one recognizer, one thread (MLX, CUDA)
         self.asr = Recognizer(profile["asr"])
-        self.brain = Brain(profile["brain"])
+        if self.registry.get("asr") is not None and hasattr(self.registry["asr"], "set"):
+            self.registry["asr"].set(self.asr)  # in process, as Ghost Machine runs it: counted by the governor
+        if profile["asr"].get("kind") == "nemo":  # the governor's live fallback: Parakeet to the CPU during a render
+            self.governor.hooks["asr_to_cpu"] = lambda to_cpu: self.asr_pool.submit(self.asr.move, to_cpu).result()
+        # the thermal gate's wait on the running films' status line ("cooling the GPU: 78 C -> 70 C")
+        from gma.ap import autopilot as ap_live
+        self.governor.hooks["say"] = ap_live.cooling
+        # the brain is pluggable (gma/brain.py): any OpenAI-compatible server by the profile alone, and a split set-up
+        # (a main brain with small multimodal eyes, and ears) is the brain, eyes and ears sections
+        self.brains = make_brains(profile, self.registry)
+        self.brain = self.brains.main
+
+        def voice(spec: dict) -> Voice:
+            name = spec.get("engine") or engine_for_url(self.registry, spec.get("url"))
+            return Voice(spec, use=(lambda: self.registry.use(name, wait=False)) if name else None)
+
         # the voice engine: Drama 3 ("full") by default; a profile can name Kokoro-82M there instead, or add it as
         # voice_lite, and then the page offers Full and Lite and each conversation picks one
-        self.voices = {"full": Voice(profile["voice"])}
+        self.voices = {"full": voice(profile["voice"])}
         if profile.get("voice_lite"):
-            self.voices["lite"] = Voice(profile["voice_lite"])
+            self.voices["lite"] = voice(profile["voice_lite"])
         self.voice = self.voices["full"]
         # a brain that can see (Bolt with its vision tower, on CUDA): turns about the camera go to it with the picture
-        self.eyes = Brain({**profile["brain"], **profile["eyes"]}) if profile.get("eyes") else None
+        self.eyes = self.brains.eyes
         # Eyes of Kai: captions every camera frame into a timestamped log the brain can look back through
         self.memory = Memory(profile["memory"]) if profile.get("memory") else None
         # the back agents a turn is handed to when the front brain tags it [deep]: a direct model (Redsnow 5.3) or an
         # ACP agent with tools and skills (Hermes, Claude Code, Codex); the page picks which
         self.agents = backstage.load(profile)
+        self.talks: set = set()  # the conversations open now
+        # the video panel's job service (video.py), with its voice handle as one more back agent; never picked on the
+        # page, it takes the turns that are about the video ("make a video of ...", "stop the video")
+        self.video = video.VideoService(profile["video"], profile["brain"], renderer=self.supervisor.renderer,
+                                        busy=self.busy, lanes=self.lanes) if profile.get("video") else None
+        if self.video and profile.get("autopilot"):
+            # AutoPilot (gma/ap): it directs every piece with the brain's Director lane, looks with its own eyes (Gemma
+            # 4 12B, loaded between renders on a Spark), hears the lines with Parakeet, and retakes on its own
+            from gma.ap import ears as ap_ears, eyes as ap_eyes, judge as ap_judge
+            from gma.ap.service import AutoPilotService
+
+            hear = lambda audio: self.asr_pool.submit(self.asr, audio).result()  # noqa: E731 - the app's recognizer, its own thread
+            self.video.autopilot = AutoPilotService(
+                self.video, profile["autopilot"], brain=(self.brains.director or self.brains.main) if hasattr(self, "brains") else None,
+                lanes=self.lanes,
+                eyes=ap_eyes.make(profile, self.registry),
+                judge=ap_judge.make(profile, self.registry),  # d1-2B judges the takes unless autopilot.judge says "eyes"
+                ears=ap_ears.Ears((profile["autopilot"] or {}).get("ears"), hear=hear if profile["asr"].get("kind") != "none" else None))
+        if self.video:
+            self.agents["video"] = video.VideoAgent("video", profile["video"], self.video)
+            self.agents["video"].busy = self.busy  # a spoken request waits for the person to finish it
+            self.video.on_news.append(self.video_news)
         # live facts (president, weather, news) looked up here and answered by the front brain
         self.lookup = httpx.AsyncClient(timeout=httpx.Timeout(5, connect=2)) if profile.get("lookup", True) else None
         self.voice_ids: dict[str, set[str]] = {}  # each voice engine's named voices, read when a page connects
         self.vad_path = profile.get("vad", {}).get("model", str(HERE.parent / "silero_vad.onnx"))
-        self.asr_pool = ThreadPoolExecutor(1, thread_name_prefix="asr")  # one recognizer, one thread (MLX, CUDA)
+
+    def busy(self) -> bool:
+        """Someone is talking or being answered: the video planner waits, so a turn never queues behind it on Bolt."""
+        return any(t.in_speech or t.speaking or t.held is not None or (t.reply and not t.reply.done()) for t in self.talks)
+
+    def video_news(self, kind: str, run: dict) -> None:
+        """A short spoken update on the video, in the conversation used last, once nobody is talking (``when_quiet``):
+        the first clip or piece, then every ``speak_every``, a piece made again, the end and a failure (news_line)."""
+
+        spec = self.profile.get("video") or {}
+        if not spec.get("speak_updates", True) or not self.talks:
+            return
+        done = sum(1 for c in run.get("clips", []) if c.get("state") == "done")
+        every = int(spec.get("speak_every", 3))
+        words = news_line(kind, run, done, every)
+        if words is None:
+            return
+        talk = max(self.talks, key=lambda t: t.active_at)
+        # one update waits at a time: a newer one replaces it, so updates never pile up behind a reply
+        old = getattr(talk, "news", None)
+        if old is not None and not old.done():
+            old.cancel()
+        talk.news = asyncio.create_task(talk.when_quiet(lambda: talk.say(words, talk.name, "happy" if kind not in ("failed", "retake") else "concerned",
+                                                                         "says", remember=False)))
+
+
+def news_line(kind: str, run: dict, done: int, every: int) -> str | None:
+    """The one short spoken line for a video update, or None: a clip-by-clip run says its first clip, every ``every``
+    clips and the end; an AutoPilot film its first piece, every ``every`` pieces, a piece made again, and the end."""
+
+    if run.get("mode") == "autopilot":
+        if kind == "clip":
+            if done == run.get("count") or (done != 1 and (not every or done % every)):
+                return None
+            return "The first part of the film is ready." if done == 1 else f"Part {done} of the film is ready."
+        if kind == "retake":
+            return "That part didn't hold up, so I'm making it again."
+        if kind == "done":
+            return f"The film is finished, {done} parts."
+        return "The film stopped. " + str(run.get("said") or "The panel has the details.")[:120]
+    if kind == "clip":
+        if run.get("mode") == "single" or done == run.get("count") or (done != 1 and (not every or done % every)):
+            return None  # a single clip, and the last of a run, are told by "done"
+        return f"Clip {done} of the video is ready." if done > 1 else "The first clip of the video is ready."
+    if kind == "done":
+        return "The video is ready." if done == 1 else f"The video is finished, {done} clips."
+    if kind == "retake":
+        return None
+    return "The video stopped. " + str(run.get("said") or "The panel has the details.")[:120]
 
 
 class Conversation:
@@ -172,7 +272,10 @@ class Conversation:
         self.in_speech, self.voiced, self.silent = False, 0, 0
         self.reply: asyncio.Task | None = None
         self.speaking = False
-        self.history = [{"role": "system", "content": engines.profile["brain"].get("system", "You are a helpful voice assistant.")}]
+        system = engines.profile["brain"].get("system", "You are a helpful voice assistant.")
+        if engines.video and "video panel" not in system:  # it can make videos: it must never say it can't
+            system = f"{system} {VIDEO_NOTE}"
+        self.history = [{"role": "system", "content": system}]
         self.send_lock = asyncio.Lock()
         self.warming: asyncio.Event | None = None  # set = stop warming
         self.audio_at = 0.0  # when the microphone last sent audio
@@ -184,12 +287,13 @@ class Conversation:
         self.hands: list = []  # the page's hand tracking: [{side, up: [finger names], count}], exact where a model guesses
         self.hands_at = 0.0
         self.heard = {"yes": True}
-        self.agent = engines.profile.get("agent") or next(iter(engines.agents), None)
+        self.agent = engines.profile.get("agent") or next((n for n, a in engines.agents.items() if a.kind != "video"), None)
         self.tasks: set[asyncio.Task] = set()  # back agents at work after their turn ended
         self.asking: dict | None = None  # a back agent's tool waiting for the person's "yes, go ahead"
         self.engine = "full"  # which voice engine speaks (the page can switch to "lite" when the profile has both)
         self.voice_name = engines.profile["voice"].get("voice")  # the page can pick another
         self.name = engines.profile.get("assistant_name", "Boo")  # what the assistant is called; the page can rename it
+        self.active_at = time.monotonic()  # when the person last spoke or typed here (spoken video updates go here)
 
     @property
     def voice(self) -> Voice:
@@ -243,8 +347,12 @@ class Conversation:
             self.recent = (self.recent + [window])[-max(self.preroll, self.start_windows) :]
             self.voiced = self.voiced + 1 if p >= self.start_p else 0
             if self.speaking and self.voiced >= self.barge_windows:
+                self.e.lanes.preempt("barge-in")  # the Director yields its brain slot at once
+                if self.e.agents.get("video") is not None:
+                    self.e.agents["video"].barged_at = time.monotonic()  # a bare "stop" now is for the voice
                 await self.interrupt("barge-in")
             if self.voiced >= self.start_windows and not self.speaking:
+                self.e.lanes.preempt("speech")
                 self.in_speech, self.silent, self.speech = True, 0, list(self.recent)
                 await self.send({"type": "speech_start"})
                 self.start_warming()
@@ -328,7 +436,13 @@ class Conversation:
         self.stop_warming()
         await self.interrupt("new turn")
         self.held = [] if quiet else None
-        self.reply = asyncio.create_task(self.turn(audio, text))
+        self.reply = asyncio.create_task(self.voice_turn(audio, text))
+
+    async def voice_turn(self, audio, text) -> None:
+        """A turn on the brain's voice lane: the Director's requests yield to it."""
+
+        async with self.e.lanes.voice():
+            await self.turn(audio, text)
 
     async def interrupt(self, why: str | None) -> None:
         """Stops the turn under way; why=None for a quiet turn nobody heard."""
@@ -358,11 +472,49 @@ class Conversation:
     def start_task(self, agent, text: str, last: str | None) -> None:
         # only the user's own words (with what the camera or hand tracker measured, when the turn used them): the front
         # brain's lines are guesses and stalls that the agent would copy; its own session remembers earlier tasks
-        prompt = (f"{last or text}\n\n[Do it now with your tools and reply with the answer itself, never that you "
+        # The video agent reads the words alone too: the camera never goes into a video
+        prompt = (f"{text if agent.kind == 'video' else (last or text)}\n\n[Do it now with your tools and reply with the answer itself, never that you "
                   f"will check: nothing after this reply reaches the user.]")
         job = asyncio.create_task(self.backstage(agent, prompt))
         self.tasks.add(job)
         job.add_done_callback(self.tasks.discard)
+
+    async def start_when_heard(self, heard: dict, agent, text: str, last: str | None) -> None:
+        """Starts a back agent's task once its turn is let out; never when the quiet turn was dropped (a new turn began,
+        or the page went away): a video must not start for half a sentence."""
+
+        while not heard["yes"]:
+            if self.heard is not heard or self.closed:
+                return
+            await asyncio.sleep(0.03)
+        self.start_task(agent, text, last)
+
+    async def video_turn(self, agent, text: str, heard: dict) -> str:
+        """A turn about the video, answered by the video agent alone: one short line, spoken as this turn's reply (the
+        front brain says nothing, so there is never a second, contradictory answer). The whole story, a refusal's
+        reason with its numbers, goes to the page's task card and the panel; only the short line is spoken."""
+
+        while not heard["yes"]:  # a quiet turn: only once the person has really stopped (no video for half a sentence)
+            await asyncio.sleep(0.03)
+        task = f"t{id(text) % 100000}"
+        await self.send({"type": "task", "id": task, "agent": agent.label, "state": "started"})
+
+        def progress(kind: str, value: str) -> None:
+            if kind == "video":  # the video agent's word to the panel ("show" the last clip)
+                try:
+                    asyncio.create_task(self.send({"type": "video", **json.loads(value)}))
+                except ValueError:
+                    pass
+
+        started = time.monotonic()
+        try:
+            said, detail = await agent.handle(text, progress)
+        except Exception as error:
+            await self.send({"type": "task", "id": task, "agent": agent.label, "state": "error", "text": str(error)[:300]})
+            return "Something went wrong with the video. The panel has the details."
+        await self.send({"type": "task", "id": task, "agent": agent.label, "state": "done", "text": detail,
+                         "seconds": round(time.monotonic() - started, 1)})
+        return said
 
     async def backstage(self, agent, prompt: str) -> None:
         """A back agent's task: its steps go to the page as they happen, its answer is spoken once nobody is talking."""
@@ -371,6 +523,12 @@ class Conversation:
         await self.send({"type": "task", "id": task, "agent": agent.label, "state": "started"})
 
         def progress(kind: str, value: str) -> None:
+            if kind == "video":  # the video agent's word to the panel ("show" the last clip)
+                try:
+                    asyncio.create_task(self.send({"type": "video", **json.loads(value)}))
+                except ValueError:
+                    pass
+                return
             asyncio.create_task(self.send({"type": "task", "id": task, "agent": agent.label, "state": "step",
                                            "kind": kind, "text": step_text(kind, value)}))
 
@@ -446,10 +604,14 @@ class Conversation:
         clock = Clock()
         speaker = self.voice  # a switch of engine mid-reply applies to the next reply (one sample rate per reply)
         spoken: list[str] = []
+        finished = [False]  # the reply spoken to its end (not cut off)
         asked = False
         tag = [""]  # the mood tag, kept in the history so the brain keeps tagging
         jobs: list[asyncio.Task] = []  # the back brain, stopped with the turn
+        refusal = ""  # the governor's short line, spoken once the turn has ended
         heard = self.heard = {"yes": self.held is None}  # let_out flips it for a quiet turn
+        render = getattr(getattr(self.e, "supervisor", None), "renderer", None)
+        holding = bool(render is not None and audio is not None and render.hold_for_voice(True))  # a voice turn first
         try:
             if audio is not None:
                 loop = asyncio.get_running_loop()
@@ -458,6 +620,7 @@ class Conversation:
             await self.emit({"type": "transcript", "text": text})
             if not text:
                 return
+            self.active_at = time.monotonic()
             ask = self.asking
             if ask and not ask["future"].done() and (choice := backstage.answer(text)):
                 while not heard["yes"]:  # a quiet turn answers only once it is let out (the person really stopped)
@@ -526,6 +689,7 @@ class Conversation:
 
             deep: list[asyncio.Queue] = []  # a direct back agent's reply, when the front brain hands the turn over
             agent = self.e.agents.get(self.agent)
+            agent = backstage.claims(text, self.e.agents, agent) or agent  # "make a video of ..." goes to the video agent
             handed = [False]
 
             async def think_deep(queue: asyncio.Queue) -> None:
@@ -541,7 +705,8 @@ class Conversation:
                     deep.append(asyncio.Queue())
                     jobs.append(asyncio.create_task(think_deep(deep[0])))
                 else:  # tools take a while: it works in the background and reports when done
-                    self.start_task(agent, text, last)
+                    # only once the person has really stopped (a quiet turn dropped mid-sentence starts nothing)
+                    asyncio.create_task(self.start_when_heard(heard, agent, text, last))
                 await self.emit({"type": "deep", "agent": agent.name, "label": agent.label, "kind": agent.kind})
                 clock.mark("deep_ms")
 
@@ -549,20 +714,24 @@ class Conversation:
             # model copies their brackets around a whole answer
             note = EYES_SYSTEM.format(name=self.name) if picture is not None else None
             looked_up = None
-            if self.e.lookup and backstage.LIVE.search(text.lower()) and not (agent and backstage.asked_for(text, agent, live=False)):
+            if agent and agent.kind == "video":  # found in code ("make a video of ..."): the video agent answers alone
+                brain, picture, last, note = Said(await self.video_turn(agent, text, heard)), None, None, None
+                handed[0] = True
+                clock.mark("deep_ms")
+            elif self.e.lookup and backstage.LIVE.search(text.lower()) and not (agent and backstage.asked_for(text, agent, live=False)):
                 # a live fact: search now and let the front brain answer in this turn (seconds, not a back agent's half minute)
                 await self.emit({"type": "emotion", "emotion": "thinking"})
                 looked_up = await lookup.look_up(text, self.e.lookup)
                 clock.mark("lookup_ms")
                 if looked_up:
                     last, brain, picture = looked_up, self.e.brain, None
-            if looked_up:
+            if looked_up or handed[0]:
                 pass
             elif agent and backstage.asked_for(text, agent):  # "ask Hermes ...", live facts: hand over at once
                 await hand_over()
-                if agent.kind == "acp":  # a fixed short line: the front brain would guess the answer from memory
+                if agent.kind in ("acp", "video"):  # a fixed short line: the front brain would guess the answer from memory
                     await self.emit({"type": "emotion", "emotion": "thinking"})
-                    brain = backstage.Ack()
+                    brain = backstage.Ack(getattr(agent, "ack", None))
 
             spoken_any = [False, False]
             said_text = [""]
@@ -571,25 +740,28 @@ class Conversation:
                 # tags such as "[happy]" and "[deep]" go to the face and the back agent, never to the voice; a model
                 # may put one mid-reply and a token may hold half of one, so text after an open "[" waits for its "]"
                 carry = ""
-                async for piece in brain.stream(self.messages(note, last), picture):
-                    clock.mark("first_token_ms")
-                    carry += piece
-                    if "[" in carry[carry.rfind("]") + 1:] and len(carry) - carry.rfind("[") < 24:
-                        continue
-                    for name in " ".join(re.findall(r"\[(\w+(?: \w+)*)\]", carry)).split():  # "[deep happy]" holds two
-                        name = name.lower()
-                        if name == "deep":
-                            if agent and not handed[0] and picture is None:  # the camera model's answer is the answer
-                                await hand_over()
-                        elif name in MOODS:
-                            tag[0] = f"[{name}] "
-                            await self.emit({"type": "emotion", "emotion": name})
-                    piece, carry = re.sub(r"\s*\[\w+(?: \w+)*\]", "", carry), ""
-                    said_text[0] += piece
-                    if piece.strip() or (piece and spoken_any[0]):
-                        spoken_any[0] = True
-                        yield piece.lstrip() if not spoken_any[1] else piece
-                        spoken_any[1] = True
+                # closed at once when the turn ends or is cut (aclosing): an unclosed stream kept its brain request
+                # "in flight" until garbage collection, and a brain the render had to release stayed resident
+                async with aclosing(brain.stream(self.messages(note, last), picture)) as stream:
+                    async for piece in stream:
+                        clock.mark("first_token_ms")
+                        carry += piece
+                        if "[" in carry[carry.rfind("]") + 1:] and len(carry) - carry.rfind("[") < 24:
+                            continue
+                        for name in " ".join(re.findall(r"\[(\w+(?: \w+)*)\]", carry)).split():  # "[deep happy]" holds two
+                            name = name.lower()
+                            if name == "deep":
+                                if agent and not handed[0] and picture is None:  # the camera model's answer is the answer
+                                    await hand_over()
+                            elif name in MOODS:
+                                tag[0] = f"[{name}] "
+                                await self.emit({"type": "emotion", "emotion": name})
+                        piece, carry = re.sub(r"\s*\[\w+(?: \w+)*\]", "", carry), ""
+                        said_text[0] += piece
+                        if piece.strip() or (piece and spoken_any[0]):
+                            spoken_any[0] = True
+                            yield piece.lstrip() if not spoken_any[1] else piece
+                            spoken_any[1] = True
                 if carry.strip():
                     said_text[0] += re.sub(r"\s*\[\w+(?: \w+)*\]", "", carry)
                     yield re.sub(r"\s*\[\w+(?: \w+)*\]", "", carry)
@@ -625,34 +797,88 @@ class Conversation:
                         if not started:
                             started = True
                             clock.mark("first_audio_ms")
+                            if holding:  # the reply has begun: the render goes on
+                                render.hold_for_voice(False)
+                                holding = False
                             await self.emit({"type": "audio_start", "sample_rate": speaker.sample_rate})
                         await self.emit(pcm)
                 spoken.append(sentence)
             clock.mark("done_ms")
+            finished[0] = True
             if repeat:
                 log({"type": "repeat", "text": repeat[0]})
             await self.emit({"type": "audio_end"})
             await self.emit({"type": "metrics", **clock.marks})
         except asyncio.CancelledError:
             raise
+        except Refusal as error:  # the governor said no (memory, a render holds the engine): one short spoken line
+            await self.emit({"type": "error", "error": str(error)[:300], "refused": True})
+            refusal = error.said
         except Exception as error:  # an engine down: say so, keep listening
             await self.emit({"type": "error", "error": f"{type(error).__name__}: {error}"})
         finally:
+            if holding:
+                render.hold_for_voice(False)
             self.speaking = False
             for job in jobs:
                 job.cancel()
             if asked and self.history[-1]["role"] == "user":
-                if heard["yes"] and spoken:  # what was actually said goes in, even when cut off
+                if heard["yes"] and spoken and (finished[0] or len(" ".join(spoken).split()) >= CLIPPED_WORDS):
+                    # what was actually said goes in, even when cut off; a reply cut after its first few words does
+                    # not: the brain copied those clipped lines (measured on the DGX Spark, 2026-11-07: 10 of 23 replies during
+                    # a film ended after 1-7 tokens once "I am doing" and the like were in the history)
                     self.history.append({"role": "assistant", "content": tag[0] + " ".join(spoken)})
                 else:
                     # a quiet turn nobody heard, or a reply stopped before its first words: as if it never happened (a
                     # placeholder such as "(interrupted)" in the history is copied by the brain and spoken as a reply)
                     self.history.pop()
+        if refusal:
+            await self.speak_refusal(refusal)
+
+    async def speak_refusal(self, line: str) -> None:
+        """A refusal's short line, spoken (not kept in the history); a voice that is itself refused leaves the line
+        on the page only."""
+
+        try:
+            await self.say(line, self.name, "concerned", "says", remember=False)
+        except Refusal:
+            await self.emit({"type": "reply", "text": line, "source": self.name})
 
 
 def build(profile: dict) -> FastAPI:
-    app = FastAPI(title="keys voice agent")
     engines = Engines(profile)
+
+    @asynccontextmanager
+    async def lifespan(_app):
+        adopted = await asyncio.to_thread(engines.supervisor.start)  # running engines adopted, never started twice
+        print(time.strftime("%H:%M:%S"), json.dumps({"type": "engines", "adopted": adopted}), flush=True)
+        if engines.video:  # a video run that was at work when the agent stopped carries on
+            await engines.video.resume()
+        try:
+            yield
+        finally:
+            if getattr(engines, "live", None) is not None:  # the live stage's picture engine ends with the app too
+                await engines.live.shutdown()
+            await asyncio.to_thread(engines.supervisor.shutdown)  # the engines started here end with the app
+
+    app = FastAPI(title="Ghost Machine + AutoPilot", lifespan=lifespan)
+    engines.supervisor.routes(app)
+    if profile.get("multiverse"):  # keys Ghost Multiverse Studio (gma/multiverse): its page is "/", this one /classic
+        from gma.multiverse.routes import register as multiverse
+
+        multiverse(app, engines, profile)
+    if engines.video and profile.get("look", True) is not False:  # the look over what is watched (gma/look.py): Natural, HDR, Neon, Sonar
+        from gma.look import register as look
+
+        look(app, engines, profile)
+    if profile.get("watch"):  # its invisible mode (gma/watch): the Ghost over a timeline of what the agents make, /invisible
+        from gma.watch.routes import register as watch
+
+        watch(app, engines, profile)
+    if profile.get("live"):  # the live stage (gma/live): a scene that plays as it is made, directed by voice or typed notes, /live
+        from gma.live.routes import register as live
+
+        live(app, engines, profile)
 
     @app.get("/")
     def page():
@@ -672,12 +898,123 @@ def build(profile: dict) -> FastAPI:
         return JSONResponse({"ok": True, "profile": profile.get("name"), "asr": profile["asr"]["model"],
                              "brain": profile["brain"]["model"], "voice": profile["voice"]["model"],
                              "voice_lite": (profile.get("voice_lite") or {}).get("model"),
-                             "eyes": (profile.get("eyes") or {}).get("model")})
+                             "eyes": (profile.get("eyes") or {}).get("model"), "brains": engines.brains.describe(),
+                             "governor": engines.governor.phase,
+                             "video": engines.video.renderer.name if engines.video else None})
+
+    # ----- the video panel (video.py) -----
+
+    def need_video():
+        if not engines.video:
+            raise video.Refused("Video is not set up in this profile (its \"video\" section).")
+        return engines.video
+
+    def refused(error: video.Refused, code: int = 409):
+        return JSONResponse({"error": str(error)}, status_code=code)
+
+    @app.post("/api/video/start")
+    async def video_start(request: Request):
+        try:
+            body = await request.json()
+        except ValueError:
+            body = {}
+        if not isinstance(body, dict):
+            body = {}
+        try:
+            seed = body.get("seed") if isinstance(body.get("seed"), dict) else None
+            return JSONResponse(await need_video().start(str(body.get("prompt") or ""), str(body.get("mode") or "single"),
+                                                         body.get("clips"), body.get("seconds"), seed))
+        except video.Refused as error:
+            return refused(error)
+        except (TypeError, ValueError) as error:
+            return refused(video.Refused(str(error) or "clips and seconds are numbers"), 400)
+
+    @app.post("/api/video/stop")
+    async def video_stop():
+        try:
+            return JSONResponse(await need_video().stop())
+        except video.Refused as error:
+            return refused(error)
+
+    @app.get("/api/video/status")
+    def video_status():
+        return JSONResponse(engines.video.snapshot() if engines.video else {"run": None, "state": "off", "clips": []})
+
+    @app.get("/api/video/clips")
+    def video_clips():
+        return JSONResponse(engines.video.snapshot()["clips"] if engines.video else [])
+
+    @app.get("/api/video/events")
+    async def video_events(request: Request):
+        """The run's state each time it changes, as server-sent events (a few a second at most; a slow page skips to
+        the newest), with a comment every 15 s to keep proxies from closing it."""
+
+        if not engines.video:
+            return JSONResponse({"error": "video is not set up"}, status_code=404)
+        service, queue = engines.video, asyncio.Queue(maxsize=2)
+        service.listeners.add(queue)
+
+        async def events():
+            try:
+                yield f"data: {json.dumps(service.snapshot())}\n\n"
+                sent = 0.0
+                while not await request.is_disconnected():
+                    try:
+                        state = await asyncio.wait_for(queue.get(), 15)
+                    except asyncio.TimeoutError:
+                        yield ": still here\n\n"
+                        continue
+                    wait = 0.25 - (time.monotonic() - sent)  # at most 4 a second
+                    if wait > 0:
+                        await asyncio.sleep(wait)
+                        while not queue.empty():
+                            state = queue.get_nowait()
+                    sent = time.monotonic()
+                    yield f"data: {json.dumps(state)}\n\n"
+            finally:
+                service.listeners.discard(queue)
+
+        return StreamingResponse(events(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
+
+    @app.get("/api/video/preview.jpg")
+    def video_preview():
+        still = engines.video.still if engines.video else None
+        if not still:
+            return Response(status_code=204)
+        kind = "image/png" if still[:4] == b"\x89PNG" else "image/jpeg"
+        return Response(still, media_type=kind, headers={"Cache-Control": "no-store"})
+
+    @app.get("/api/video/clip/{run_id}/{name}")
+    def video_clip(run_id: str, name: str, hdr: bool = False):
+        found = re.fullmatch(r"(\d{1,4})\.(mp4|jpg)", name)
+        try:
+            path = need_video().clip_file(run_id, int(found.group(1)), found.group(2)) if found else None
+        except video.Refused:
+            path = None
+        if not path or not path.is_file():
+            return JSONResponse({"error": "no such clip"}, status_code=404)
+        if name.endswith(".mp4") and getattr(engines, "look", None):  # its copy in the look set now, once that is made
+            path = engines.look.shown(path, hdr)
+        return FileResponse(path, media_type="video/mp4" if name.endswith(".mp4") else "image/jpeg")
+
+    @app.get("/api/video/film")
+    async def video_film(run: str | None = None, hdr: bool = False):
+        try:
+            path = await need_video().film(run)
+        except video.Refused as error:
+            return refused(error, 404)
+        except (OSError, ValueError):
+            return JSONResponse({"error": "no such run"}, status_code=404)
+        if getattr(engines, "look", None):
+            path = engines.look.shown(path, hdr)
+        return FileResponse(path, media_type="video/mp4", filename=f"boo-video-{run or 'latest'}.mp4")
 
     @app.websocket("/ws")
     async def ws(socket: WebSocket):
         await socket.accept()
         talk = Conversation(socket, engines)
+        engines.talks.add(talk)
         await talk.send({"type": "ready", "input_rate": SAMPLE_RATE})
 
         async def offer_voices() -> None:
@@ -696,7 +1033,7 @@ def build(profile: dict) -> FastAPI:
                 await talk.send({"type": "engines", "current": talk.engine,
                                  "list": [{"id": n, "label": ENGINE_LABELS.get(n, n)} for n in up]})
         await talk.send({"type": "agents", "current": talk.agent,
-                         "list": [{"id": a.name, "label": a.label, "kind": a.kind} for a in engines.agents.values()]})
+                         "list": [{"id": a.name, "label": a.label, "kind": a.kind} for a in engines.agents.values() if a.kind != "video"]})
         try:
             while True:
                 message = await socket.receive()
@@ -752,9 +1089,13 @@ def build(profile: dict) -> FastAPI:
         except WebSocketDisconnect:
             pass
         finally:
+            engines.talks.discard(talk)
             talk.closed = True
             talk.stop_warming()
-            await talk.interrupt("closed")
+            try:
+                await talk.interrupt("closed")
+            except Exception:  # the page is gone: the turn is stopped, there is no one to tell
+                pass
             for job in list(talk.tasks):
                 job.cancel()
 
@@ -791,7 +1132,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--profile", required=True)
     parser.add_argument("--host", default=os.environ.get("VOICE_HOST", "127.0.0.1"))
-    parser.add_argument("--port", type=int, default=int(os.environ.get("VOICE_PORT", "8095")))
+    parser.add_argument("--port", type=int, default=int(os.environ.get("VOICE_PORT", "8196")))
     parser.add_argument("--voice", choices=["full", "lite", "both"], default=os.environ.get("VOICE_ENGINE") or None,
                         help="full: Drama 3 (default); lite: Kokoro-82M; both: Drama 3 with a Full/Lite switch in the page")
     args = parser.parse_args()

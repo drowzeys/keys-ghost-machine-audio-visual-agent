@@ -268,6 +268,8 @@ def asked_for(text: str, agent, live: bool = True) -> bool:
     """Whether the person asked for the back agent by name or for deep thought ("ask Hermes", "think hard"), or (with
     ``live``) for a fact that changes after training."""
 
+    if getattr(agent, "wants", None) and agent.wants(text):  # a tool agent that knows its own requests (video.py)
+        return True
     low = text.lower()
     names = {agent.name.lower(), agent.label.lower(), "the agent", "your agent", *SOUNDS_LIKE.get(agent.name, ())}
     return any(f"{verb} {n}" in low for verb in ("ask", "tell", "have", "get") for n in names) or \
@@ -281,9 +283,22 @@ class Ack:
     LINES = ("Let me check.", "On it, one moment.", "Let me find out.", "Checking now.", "Give me a moment to look.")
     turn = 0
 
+    def __init__(self, lines: tuple | None = None) -> None:
+        self.lines = lines or self.LINES  # an agent's own short lines ("On it." for the video)
+
     async def stream(self, messages: list[dict], image_png: str | None = None) -> AsyncIterator[str]:
         Ack.turn += 1
-        yield self.LINES[Ack.turn % len(self.LINES)]
+        yield self.lines[Ack.turn % len(self.lines)]
+
+
+def claims(text: str, agents: dict, picked):
+    """A tool agent marked "always" (the video's) that this turn is about, when the page has picked another agent:
+    "make a video of a lighthouse" goes to the video agent even while Hermes is the agent for everything else."""
+
+    if picked is not None and getattr(picked, "wants", None) and picked.wants(text):
+        return picked
+    return next((a for a in agents.values() if a is not picked and getattr(a, "always", False)
+                 and getattr(a, "wants", None) and a.wants(text)), None)
 
 
 def load(profile: dict) -> dict:
