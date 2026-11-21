@@ -1,4 +1,4 @@
-// keys Ghost Multiverse Studio, invisible mode: the Ghost perched above a timeline of everything the agents make.
+// keys Ghost Machine Studio, invisible mode: the Ghost perched above a timeline of everything the agents make.
 // The first creation on the left, the newest on the right; forks (a retake, a second option, another agent's take
 // on the same thing) branch into the lanes below. Search finds any creation by its words or the Ghost's description;
 // a click opens it: the picture, clip or sound, the Ghost's summary and description, who made it, from what.

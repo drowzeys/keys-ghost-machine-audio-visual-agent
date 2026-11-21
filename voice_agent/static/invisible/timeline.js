@@ -1,4 +1,4 @@
-// keys Ghost Multiverse Studio, invisible mode: the timeline's pure part (no DOM), so node can test it
+// keys Ghost Machine Studio, invisible mode: the timeline's pure part (no DOM), so node can test it
 // (tests/js/timeline.test.mjs). Left to right is time: every creation gets its own column, in the order it was made.
 // Top to bottom are lanes: a creation continues its parent's lane when it is that parent's first child and the lane is
 // still at the parent; any other child (a fork, a retake, a second option) takes the nearest free lane below. A lane

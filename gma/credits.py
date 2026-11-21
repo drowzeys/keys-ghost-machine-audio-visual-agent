@@ -60,7 +60,7 @@ CREDITS = [
     {"name": "Eyes of Kai", "by": "tonyd2wild", "what": "the camera memory log", "licence": "MIT"},
     {"name": "MediaPipe", "by": "Google", "what": "face and hand tracking in the page", "licence": "Apache-2.0"},
     {"name": "Three.js", "by": "the three.js authors", "what": "Boo, the 3D ghost (also the Ghost on the multiverse tree)", "licence": "MIT"},
-    {"name": "keys Ghost Multiverse Studio", "by": "keys (drowzeys)", "what": "the Ghost-first page: a film as a tree of clips with options ahead, the active path lit and roads not taken dimmed (gma/multiverse/)", "licence": "MIT"},
+    {"name": "keys Ghost Machine Studio", "by": "keys (drowzeys)", "what": "the Ghost-first page: a film as a tree of clips with options ahead, the active path lit and roads not taken dimmed (gma/multiverse/)", "licence": "MIT"},
     {"name": "Loom", "by": "Janus (@repligate) and contributors", "what": "the idea of a multiverse interface: a tree of generated continuations to compare and branch from", "licence": "idea, credited (Loom is MIT)"},
     {"name": "The Garden of Forking Paths", "by": "Jorge Luis Borges", "what": "the image of a story taking every road at once", "licence": "idea, credited"},
     {"name": "Pillow", "by": "Alex Clark and contributors", "what": "the multiverse's development stand-in renderer: generated scenes, no photographs", "licence": "MIT-CMU"},

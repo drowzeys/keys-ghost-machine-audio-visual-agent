@@ -1,4 +1,4 @@
-"""keys Ghost Multiverse Studio (gma/multiverse): the tree model and its states, the store, the voice's words, the
+"""keys Ghost Machine Studio (gma/multiverse): the tree model and its states, the store, the voice's words, the
 Director's options, the one-at-a-time render queue against the governor's room, export, and the HTTP API on the whole
 app. The renders are the stub renderer's (Pillow + ffmpeg) or a fake; no model is loaded."""
 
@@ -342,7 +342,7 @@ def test_the_app_serves_the_multiverse(monkeypatch, tmp_path):
     }
     with TestClient(server.build(profile)) as client:
         page = client.get("/")
-        assert page.status_code == 200 and "keys Ghost Multiverse Studio" in page.text
+        assert page.status_code == 200 and "keys Ghost Machine Studio" in page.text
         assert "Ghost Machine" in client.get("/classic").text or client.get("/classic").status_code == 200
         assert client.get("/multiverse/tree.js").status_code == 200
         assert client.get("/multiverse/../server.py").status_code == 404
@@ -372,7 +372,7 @@ def test_the_app_serves_the_multiverse(monkeypatch, tmp_path):
         assert client.get(f"/api/multiverse/projects/{pid}/film.mp4").status_code == 200
         assert client.get("/api/multiverse/projects").json()["projects"][0]["id"] == pid
         names = [c["name"] for c in client.get("/api/credits").json()]
-        assert "keys Ghost Multiverse Studio" in names and "Loom" in names
+        assert "keys Ghost Machine Studio" in names and "Loom" in names
 
 
 def test_a_drafts_keyframe_beside_the_last_frame_is_scaled_into_the_edits_pixels():

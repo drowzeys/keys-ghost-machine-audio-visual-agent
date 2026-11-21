@@ -1,4 +1,4 @@
-"""keys Ghost Multiverse Studio: a film as a walk through a tree of clips.
+"""keys Ghost Machine Studio: a film as a walk through a tree of clips.
 
 The Ghost (the voice agent's face) stands on one node of the tree. At each step the Director writes two or three
 distinct directions for what happens next, each rendered first as a cheap draft (a keyframe, then a short low-res

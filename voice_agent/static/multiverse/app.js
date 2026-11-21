@@ -1,4 +1,4 @@
-// keys Ghost Multiverse Studio: the page. The Ghost first (its face, its voice); then the film as a tree, past to the
+// keys Ghost Machine Studio: the page. The Ghost first (its face, its voice); then the film as a tree, past to the
 // left and futures to the right, the Ghost standing on its node with the voice docked to it, the walked path lit and
 // the roads not taken dimmed. Plain modules, no build step.
 

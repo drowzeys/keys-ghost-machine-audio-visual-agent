@@ -9,7 +9,7 @@ let playing = false, nextAt = 0, stalls = 0, spokenTo = LOADED, saidTimer = 0;
 let shown = { still: null, idle: null, talk: null, rush: null }, speaking = 0, speakingWho = "", picked = null;   // picked: a take chosen from the list
 const ACTION = location.pathname.startsWith("/live-action");   // Live Action: the rehearsal and the take; /live: the stream
 document.body.classList.add(ACTION ? "action" : "stream");
-document.title = (ACTION ? "Live Action" : "Live stage") + " · keys Ghost Multiverse Studio";
+document.title = (ACTION ? "Live Action" : "Live stage") + " · keys Ghost Machine Studio";
 { const on = $("navAction"); on.classList.add("on"); on.setAttribute("aria-current", "page"); }
 let toldTo = LOADED;
 let gap = 1000 / FPS;       // ms between two pictures on the screen: longer when the engine is slower than playback

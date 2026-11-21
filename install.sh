@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # One-shot install of Keys Ghost Machine (Boo) on a DGX Spark or an Apple silicon Mac:
 #
-#   curl -fsSL https://raw.githubusercontent.com/drowzeys/keys-ghost-machine-audio-visual-agent/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/drowzeys/ghost-machine-studio/main/install.sh | bash
 #   … | bash -s -- --voice lite      the lite voice (Kokoro-82M) instead of Drama 3: about 21 GB less disk, less memory
 #   … | bash -s -- --voice both      both voices, with a Full/Lite switch in the page
 #
@@ -24,7 +24,9 @@
 
 set -euo pipefail
 
-REPO=drowzeys/keys-ghost-machine-audio-visual-agent
+REPO=drowzeys/ghost-machine-studio            # the code and the release builds, on GitHub
+HF_REPO=drowzeys/keys-ghost-machine-audio-visual-agent   # the voices, on Hugging Face
+BRANCH=${KGM_BRANCH:-boo}                     # Boo alone; the Studio (main) has its own installer, install-studio.sh
 RELEASE=${KGM_RELEASE:-v0.3.0}
 TF_VERSION=1.1.5
 KAI_COMMIT=7f2f02b
@@ -173,9 +175,11 @@ note "node $(node --version)"
 say "Boo's agent and page"
 APP=$KGM_HOME/app
 if [ -d "$APP/.git" ]; then
-  git -C "$APP" pull -q --ff-only || note "warning: could not update $APP (local changes?); using it as it is"
+  git -C "$APP" remote set-url origin "https://github.com/$REPO"
+  git -C "$APP" fetch -q origin "$BRANCH" && git -C "$APP" checkout -q -B "$BRANCH" "origin/$BRANCH" 2>/dev/null \
+    || note "warning: could not update $APP (local changes?); using it as it is"
 else
-  git clone -q "https://github.com/$REPO" "$APP"
+  git clone -q -b "$BRANCH" "https://github.com/$REPO" "$APP"
 fi
 note "$(git -C "$APP" log -1 --format='%h %s' | cut -c1-80)"
 
@@ -259,7 +263,7 @@ VOICES=$KGM_HOME/voices
 if [ "$DRAMA" = 1 ]; then
 say "Voices"
 if [ ! -f "$VOICES/.kgm-ready" ]; then
-  "$HF" download "$REPO" --local-dir "$KGM_HOME/hf-voices" --include "voices/$PLATFORM/*" --include "previews/*" >/dev/null
+  "$HF" download "$HF_REPO" --local-dir "$KGM_HOME/hf-voices" --include "voices/$PLATFORM/*" --include "previews/*" >/dev/null
   mkdir -p "$VOICES" && cp "$KGM_HOME/hf-voices/voices/$PLATFORM/"*.json "$VOICES/" && cp "$KGM_HOME/hf-voices/previews/"*.wav "$VOICES/"
   rm -rf "$KGM_HOME/hf-voices" && touch "$VOICES/.kgm-ready"
 fi
