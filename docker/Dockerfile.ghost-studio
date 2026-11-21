@@ -1,0 +1,24 @@
+# Ghost Multiverse Studio 1.0 beta for an NVIDIA DGX Spark (linux/arm64, CUDA 13): the app alone.
+# The four pages, the voice loop, AutoPilot, the Multiverse and the Live Action stage's own code, with their Python
+# dependencies. No model weights and no engines: the profile you mount names servers that already run
+# (see docker/README.md, "Ghost Studio").
+FROM nvcr.io/nvidia/pytorch:26.07-py3
+
+ENV DEBIAN_FRONTEND=noninteractive PIP_NO_CACHE_DIR=1 HF_HOME=/models/hf-cache GMA_HOME=/data/app
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates libsndfile1 ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt/ghost-studio
+COPY requirements.txt requirements-spark.txt ./
+RUN pip install -r requirements.txt "nemo_toolkit[asr]>=3.0"
+COPY gm_core ./gm_core
+COPY gma ./gma
+COPY voice_agent ./voice_agent
+COPY profiles ./profiles
+COPY tools ./tools
+COPY LICENSES ./LICENSES
+COPY silero_vad.onnx LICENSE CREDITS.md README.md VERSION ./
+
+EXPOSE 8196
+# /profile.json: your profile. /data: what the app writes (takes, the Multiverse, logs). /models/hf-cache: Parakeet.
+ENTRYPOINT ["python3", "-m", "voice_agent.server", "--profile", "/profile.json", "--host", "0.0.0.0", "--port", "8196"]

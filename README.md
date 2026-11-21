@@ -1,17 +1,137 @@
+# Ghost Multiverse Studio 1.0 beta
+
+**Ghost Machine + AutoPilot on a headless Imagination Studio.** One DGX Spark hears you, answers out loud, and makes
+pictures, clips and whole short films from what you say. Version 1.0 beta adds four modes to
+[Ghost Machine](#keys-ghost-machine--audiovisual-agent-powered-by-tensorfold)'s voice agent, Boo. The tabs for them are
+in the top right corner of every page. It is a beta: built and run on one DGX Spark, with no one-shot installer of
+its own yet (see [Recipe](#recipe)). Boo alone, as released in v0.3.0, still installs with one command.
+
+| Mode | Page | What it is for |
+|---|---|---|
+| Ghost Agent | `/classic` | Talk to Boo and the back agent. The camera, Boo, and a status column: what the agent is doing, and the local models with a load and unload button each. |
+| Multiverse Timeline | `/invisible` | The Ghost watches a timeline of everything the studios on the machine make; ask it to find anything. |
+| Multiverse Generator | `/` | Walk a film as a tree of choices: every scene offers ways on, and any branch can be filmed. |
+| Live Action | `/live-action` | Rehearse a scene with its cast, call "action" and "cut", and the take is filmed and played back. |
+
+No model weights are in this repository or in its image. Read [Licences and where it may be used](#licences-and-where-it-may-be-used)
+before you run it: the clip model is MiniMax H3, whose licence excludes several territories.
+
+## Live Action
+
+![Live Action: the rehearsal, with the status light on the left and the Ready sign on the monitor](docs/media/ghost-studio-live-rehearse.png)
+
+A light down the left edge says where the scene is, and each lamp is a button that goes there.
+
+1. **Set Scene.** Describe the shot in a sentence or a whole story. Name the cast on lines of their own
+   (`Mara: a woman in her thirties, short black hair, a red raincoat`), or let the assistant read them out of the
+   story. The monitor says **Wait** while the reference shot, a close-up of each character and the blocking preview
+   are made (about two minutes), then **Ready**.
+2. **Rehearse.** Open the microphone and talk to the cast; each answers in its own voice from its close-up. Say what
+   happens ("she walks to the camera", "they fight, then fire at each other") and it becomes a timed beat in the plan.
+3. **Action.** The plan plays in real time as stick figures on a floor plan, with the lines spoken at their seconds.
+   The figures walk, run, turn, fight, jump, crouch, dance and sit, and punch, kick, wave, fly and fire a blast.
+   Talk to a character during the run-through and the answer stays in the plan.
+4. **Cut.** The run-through stops, and what was played is filmed at once behind the rehearsal (**Rolling**), in
+   five-second parts. You can go on rehearsing while it films.
+5. **Playback.** The take plays on the monitor when it is made, and stays under Takes.
+
+![Action: the run-through](docs/media/ghost-studio-live-action.png)
+
+![Rolling: the take is filmed after the cut](docs/media/ghost-studio-live-rolling.png)
+
+![Playback: the take on the monitor](docs/media/ghost-studio-live-playback.png)
+
+Measured on one DGX Spark (2026-11-20, Draft quality, 864x480): "action" to the run-through playing, about 1 s; a
+character's answer during the run-through, 0.65 s; a 5 s take, 3.5 minutes from the cut to playback. Sharp quality
+(1376x768) takes about four minutes for each five seconds and holds the stage while it films.
+
+## Ghost Agent
+
+![Ghost Agent: the camera, Boo, and the status column](docs/media/ghost-studio-ghost-agent.png)
+
+The page for talking: no video panel. Ask for anything that needs the computer and Boo hands it to the back agent
+(Hermes over ACP in the example profile), whose steps show in the status column. Questions about what the camera
+sees go to the vision model. Each local model shows whether it is loaded and how much memory it holds.
+
+## Updates
+
+**1.0 beta (2026-11-21)**
+
+- Ghost Studio is merged into `main` beside Boo's Pocket tier, d1-2B assist, memory search and Transcribe ears.
+
+- Live Action is new: the reference shot, the cast's close-ups, the blocking preview, the run-through, the take.
+- A scene written as a story, with nobody named on a line of their own, is read into a cast, an opening picture and
+  timed beats.
+- The cast can be talked to during the run-through.
+- A cut films the take by itself, behind the rehearsal (`live.auto_take`), and the page plays it when it is made.
+- The live stream (an endless rougher picture whose engine takes minutes to load) stays on its own page, `/live`.
+- The status light, and the Wait / Ready / Rolling sign on the monitor.
+- The blocking preview's figures act: MotionBricks' sample motions for a fight stance, a jump, a crouch, a dance and
+  sitting; punches, kicks, blasts, waves and flights drawn over them.
+- Ghost Agent: the video panel is gone; the back agent's status and the local models are in its place.
+- The mode tabs are renamed, Ghost Agent comes first, and they sit in the top right corner on every page.
+- Fixed: a browser that will not start the run-through's film by itself (Safari) left the figures standing; the
+  picture is now moved to the clock by hand.
+- Fixed: a camera question got no answer when the vision model was started without `--vision`.
+
+Earlier work (the FP4 clip worker, AutoPilot's self-check, the memory guard, the headless Studio, the
+Multiverse tree and timeline) is in the [build notes](docs/ghost-studio-notes.md).
+
+## Recipe
+
+Ghost Studio has been built and run on **one** DGX Spark (GB10, 128 GB, CUDA 13), by hand. There is no one-shot
+installer for the Studio yet: the steps below are what that machine has, in order. Ghost Machine's own one-shot
+installer, [further down](#one-shot-install), installs Boo alone.
+
+1. **This repository.**
+   ```sh
+   git clone https://github.com/drowzeys/keys-ghost-machine-audio-visual-agent ~/ghost-studio/repo
+   cd ~/ghost-studio/repo && python3 -m venv ~/ghost-studio/venv
+   ~/ghost-studio/venv/bin/pip install -r requirements-spark.txt    # after a CUDA 13 build of PyTorch for aarch64
+   ```
+2. **The engines the profile names.** A brain, a voice and (for camera questions) a vision model, each any
+   OpenAI-compatible server. The example profile uses TensorFold builds of Qwen3.8-27B and Cosmos3-Edge (served with
+   `--vision`), Kokoro-82M (`serve-kokoro.sh`) and Parakeet v3 for hearing.
+3. **Imagination Studio**, installed with its own installer and left unmodified. Ghost Studio starts it headless and
+   asks it for every keyframe and for a film's sound ([build notes](docs/ghost-studio-notes.md#the-headless-studio)).
+4. **The clip worker**: a Python environment with FastVideo and the FastH3 V2 NVFP4 weights, which you download
+   yourself under their licence ([build notes](docs/ghost-studio-notes.md#the-fp4-clip-worker) has the commands).
+5. **For Live Action's blocking preview**: a checkout of [NVlabs/motionbricks](https://github.com/NVlabs/motionbricks)
+   with its ONNX model and sample motions (`git lfs pull`), and ONNX Runtime, NumPy and Pillow installed beside it
+   with `pip --target`. It runs on the CPU in a container with no network. Optional: MuseTalk 1.5 for the close-ups'
+   lips.
+6. **The profile.** Copy `profiles/spark.example.json`, point its paths at what you installed, and keep the `live`,
+   `multiverse` and `watch` sections for the modes you want.
+7. **Start it.**
+   ```sh
+   ~/ghost-studio/venv/bin/python -m voice_agent.server --profile ~/ghost-studio/profile.json --port 8196
+   ```
+   Then open `http://localhost:8196/`. The microphone and the camera need `localhost` or https.
+
+### The image
+
+`ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:1.0-beta` holds the Studio's app and its Python
+dependencies for a DGX Spark (linux/arm64): the four pages, the voice loop, AutoPilot, the Multiverse and the Live
+Action stage's own code. It holds no weights and no engines. Give it a profile whose engines are servers that already
+run (`"mode": "adopt"`, or plain URLs); see [docker/README.md](docker/README.md#ghost-studio).
+
+## Licences and where it may be used
+
+Ghost Machine's own code is MIT (see [LICENSE](LICENSE)); the code kept from Imagination Studio and AutoPilot is
+Apache-2.0 (see [LICENSES](LICENSES)). What they drive is not all so:
+
+- **MiniMax H3** (every clip and take; FastH3 on FastVideo) is under the MiniMax H3 Community License, which **excludes
+  the USA, the EU, the UK and South Korea** without MiniMax's authorization. Check that licence for where you are
+  before you download the weights or make a clip. Nothing of H3 is shipped here.
+- **Drama 3** is under the Fish Audio Community License; hosted commercial use needs a licence from Fish Audio.
+- **MotionBricks**' sample motions are under the NVIDIA Sample Data Evaluation License (for evaluating and testing
+  NVIDIA technologies); its code is Apache-2.0 and its weights are under the NVIDIA Open Model License.
+- Everything else, with its licence and what it is used for, is in [CREDITS.md](CREDITS.md) and in the credits at the
+  foot of each page.
+
+---
+
 # Keys Ghost Machine — audio/visual agent, powered by [TensorFold](https://github.com/ashhart/TensorFold)
-
-## New: Ghost Multiverse Studio (the `ghost-studio` branch)
-
-[![Live Action: rehearse a scene with its cast, call action and cut, and the take is filmed and played back](https://raw.githubusercontent.com/drowzeys/keys-ghost-machine-audio-visual-agent/ghost-studio/docs/media/ghost-studio-live-rehearse.png)](https://github.com/drowzeys/keys-ghost-machine-audio-visual-agent/tree/ghost-studio#ghost-multiverse-studio)
-
-Boo with four modes on one DGX Spark: **Ghost Agent** (Boo, the camera, and the status of the back agent and the local
-models), **Multiverse Timeline**, **Multiverse Generator** (a film walked as a tree of choices) and **Live Action**
-(rehearse a scene with its cast, call "action" and "cut", and the take is filmed and played back). It lives on the
-[`ghost-studio` branch](https://github.com/drowzeys/keys-ghost-machine-audio-visual-agent/tree/ghost-studio), with its
-own README, recipe and image (`ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:ghost-studio`, the app alone: no
-weights, no engines). It is not merged into `main` yet, and it has no one-shot installer yet: everything below is Boo
-as released in v0.3.0 and later. Its clips are made with MiniMax H3, whose licence excludes the USA, the EU, the UK
-and South Korea without MiniMax's authorization; read that branch's licence section first.
 
 ## What's new in v0.3.0
 
@@ -716,6 +836,57 @@ window, and Bolt gets the nearest entries as dated lines ("Tue 14:03, seen: …"
   10 or 30 seconds, or every 1, 5 or 15 minutes.
 - **Memory**: how long captions are kept: 1, 2 (default), 3 or 5 days, or 1 week.
 
+## Video panel
+
+The page has three columns: your camera on the left (a local preview only, never recorded or used in a video), Boo
+in the middle, and a **video panel** on the right. On a phone they stack, with Boo first. Both side panels fold away.
+
+The video panel makes keyframes with the headless
+[Imagination Studio](https://github.com/drowzeys/Imagination-Studio-by-keys-Wasserman) and clips with the FP4 clip
+worker (MiniMax H3 as FastH3 V2 on FastVideo), whose Community License excludes the USA, the EU, the UK and South Korea
+unless MiniMax authorizes the use. You can use the panel's Start and Stop buttons, or ask by voice: "Boo, make a video of a lighthouse in a
+storm", "make an endless video of waves", "stop the video", "show me the last clip".
+
+While a clip renders, the panel shows it live. Today's Studio reports the sampler's steps but sends no pictures, so the
+live view is labelled "progress only". When the clip is done, it plays (muted unless you turn sound on, and always quiet
+while Boo listens or speaks), and the next clip's render follows. "Keep going" plans each next clip with Bolt from the
+story so far, and opens it on the last clip's final frame. The film downloads as one file. Runs are checkpointed clip by
+clip, so a restart resumes where it stopped.
+
+### The look: Natural, HDR, Neon, Sonar
+
+What you watch can carry a finish (`gma/look.py`). Four chips under the panel (and beside "Download film" on the
+Multiverse page) pick it; so does the voice or a typed line: "neon look", "make it HDR", "sonar reveal", "natural colours", "turn the
+look off". "Change the look" offers the four, and the next words pick one.
+
+- **Natural**: the clip as the model made it.
+- **HDR**: the Imagination Studio's HDR finish (its `hlg` job): real HDR, BT.2020 / HLG in 10-bit HEVC, bright and
+  contrasty, with an SDR copy.
+- **Neon**: a colour table first (`gma/neon.py`: greys go to cobalt blue in the dark and to hot red and magenta in the
+  light, colours that are strong already keep their hue and get stronger), then the same HDR finish at 0.6 strength.
+- **Sonar**: the sonar reveal (`gma/sonar.py`). The clip is dark and black-and-white until pulses of echolocation leave
+  its subject and run over the surfaces of the scene, leaving it in the HDR look's colour, with a sonar ping at each
+  pulse. The wave is not a circle on the picture: every frame's depth is estimated (Depth Anything V2, the metric
+  outdoor Small model), and the wave reaches a pixel when it has travelled that pixel's distance from the subject in
+  space, so it crosses a body, wraps a bus, runs along the road and climbs a wall. A 10 s clip gets two pulses and a
+  20 s film four; an early pulse's colour dies back, the last one stays. It takes about a minute and a half for a 10 s clip at
+  1376x768 on a DGX Spark, in its own process (`gma/sonar_worker.py`: numpy, and torch with transformers for the depth; the model, about 100 MB, is
+  fetched from Hugging Face on first use). `"look": {"sonar": {...}}` in a profile sets `python` (the interpreter that
+  has those packages), `at` (`[x, y]` of the picture, 0..1, where the pulses leave from; by default the nearest thing in
+  the middle of the picture), `far`, `speed` and `dist`.
+
+The finish is a copy beside the clip or the film, made in the background (CPU and ffmpeg, about a minute for a 10 s
+clip at 1376x768 on a DGX Spark); the plain clip plays until it is there, then the page switches to it. A screen that
+shows HDR and plays HEVC gets the HDR copy, any other the SDR copy. The clips the work goes on from are never touched:
+a clip that continues another still opens on its plain last frame, and AutoPilot checks plain pictures. The look is
+kept across restarts. A profile changes a look's strength with `"look": {"neon": {"strength": 0.8}}` and turns the whole
+feature off with `"look": false`. Not covered yet: the clips inside the Multiverse tree and the Invisible timeline play
+plain; only their exported film takes the look.
+
+A profile turns it on with a `video` section. A run is refused when the render host would be the machine running the
+voice models and that machine lacks room. The full design, including what the engines expose for live previews and the
+plan for the infinity engine, is in [docs/video-panel.md](docs/video-panel.md).
+
 ## Prebuilt builds
 
 The [v0.3.0 release](https://github.com/drowzeys/keys-ghost-machine-audio-visual-agent/releases/tag/v0.3.0) has
@@ -827,6 +998,8 @@ A profile names each engine and the turn timing:
 - `memory_search` (optional): an `/v1/embeddings` server for memory search by meaning; see
   [Memory search by meaning](#memory-search-by-meaning-optional).
 - `agents` and `agent`: the back agents and the default one.
+- `video` (optional): the video panel (`renderer`: `studio-headless`), clip settings (`seconds`, `max_clips`,
+  `keyframe`) and spoken updates ([docs/video-panel.md](docs/video-panel.md#profile)).
 - `d1` (optional): a d1-2B server's `url`, `threshold`, `thresholds`, `timeout_ms`, `route` and `permission`
   ([d1-2B assist](#d1-2b-assist-optional-dgx-spark)).
 - `pocket` (optional): an LFM3-Omni-2B server's `url`, `model`, `system` (it should start with "Respond with
@@ -936,6 +1109,14 @@ The code is MIT (LICENSE). Everything below keeps its own licence.
 | Silero VAD v5 | Hears when someone is speaking (`silero_vad.onnx` ships here) | Silero | MIT | [GitHub](https://github.com/snakers4/silero-vad) |
 | MediaPipe Face Detector and Hand Landmarker | Gaze tracking, exact finger counts and which hand, in the page | Google | Apache-2.0 | [GitHub](https://github.com/google-ai-edge/mediapipe) |
 | Three.js | Boo, the 3D ghost | three.js authors (mrdoob) | MIT | [GitHub](https://github.com/mrdoob/three.js) |
+| Imagination Studio | Draws the video panel's keyframes and the film's narration and score, headless | keys and Sam Wasserman | see repository | [GitHub](https://github.com/drowzeys/Imagination-Studio-by-keys-Wasserman) |
+| MiniMax H3 (FastH3 on a DGX Spark) | The video model behind every clip (FastH3 V2 on FastVideo); Boo ships no weights | MiniMax | MiniMax H3 Community License (excludes the USA, EU, UK and South Korea without MiniMax authorization) | — |
+| ComfyUI | Runs the Studio's keyframe and sound jobs on a DGX Spark | Comfy Org | GPL-3.0 | [GitHub](https://github.com/comfyanonymous/ComfyUI) |
+| HyperFlow-Infinity and Echo-Infinity | The idea behind the panel's continue mode and AutoPilot's scene memory; no code from either is in this repository | Video Rebirth; Yuxuan Bian, Nan Duan, Qiang Xu et al. | Apache-2.0 (HyperFlow-Infinity) | [GitHub](https://github.com/Video-Rebirth/hyperflow-infinity) |
+| FastVideo | Every clip: FastH3 V2 NVFP4 on its FP4 sparse-attention recipe, in the clip worker's own venv (unmodified, commit a01c50a8) | Hao AI Lab | Apache-2.0 | [GitHub](https://github.com/hao-ai-lab/FastVideo) |
+| FastH3 V2 NVFP4-Consumer | The clip model (8-step distilled MiniMax H3, NVFP4 Qwen3-VL encoder, LynnReal's light VAE, AdaLN tables) | FastVideo (Hao AI Lab) | see its model card | [Hugging Face](https://huggingface.co/FastVideo/FastVideo-FastH3-8-Step-V2-NVFP4-Consumer) |
+| FlashInfer | The clip worker's NVFP4 quantize and GEMMs | FlashInfer team | Apache-2.0 | [GitHub](https://github.com/flashinfer-ai/flashinfer) |
+| FFmpeg | The video panel's posters, a continued clip's opening frame and the joined film (used if installed, not shipped) | FFmpeg developers | LGPL-2.1+ / GPL | [ffmpeg.org](https://ffmpeg.org) |
 | ddgs | Web search for quick live facts | deedy5 | MIT | [GitHub](https://github.com/deedy5/ddgs) |
 | wttr.in | Weather for quick live facts (data from WorldWeatherOnline) | Igor Chubin | Apache-2.0 | [GitHub](https://github.com/chubin/wttr.in) |
 | NVIDIA PyTorch container | The Docker image's base (`nvcr.io/nvidia/pytorch:26.07-py3`) | NVIDIA | NVIDIA Deep Learning Container License | [NGC](https://catalog.ngc.nvidia.com/orgs/nvidia/containers/pytorch) |

@@ -12,13 +12,19 @@ import re
 import struct
 import sys
 import time
-from contextlib import aclosing
+from contextlib import aclosing, asynccontextmanager
 from typing import AsyncIterator, Callable
 
 import httpx
 import numpy as np
 
 SAMPLE_RATE = 16_000  # what the microphone sends and the recognizers take
+
+
+@asynccontextmanager
+async def unsupervised():
+    """No engine registry: the server at the URL is simply asked."""
+    yield None
 
 
 # ---------- voice activity: Silero VAD v5 through ONNX Runtime (no PyTorch) ----------
@@ -211,12 +217,32 @@ class Recognizer:
             import nemo.collections.asr as nemo_asr
 
             _guard_nemo_nvrtc_log()
-            self.model = nemo_asr.models.ASRModel.from_pretrained(self.model_id).eval().cuda()
+            self.model = nemo_asr.models.ASRModel.from_pretrained(self.model_id).eval()
+            if spec.get("dtype") in ("bfloat16", "float16"):
+                # cast before its first use (a cast after an fp32 run crashed NeMo's TDT decoder on a GB10): measured on
+                # a DGX Spark, bf16 holds ~1.1 GB less and transcribes a short turn in 21 ms instead of 40, same words
+                import torch
+
+                self.model = self.model.to(getattr(torch, spec["dtype"]))
+            self.model = self.model.cuda()
         else:
             raise ValueError(f"unknown recognizer kind {self.kind}")
         if self.kind in ("parakeet-mlx", "mlx-audio"):
             cap_mlx_cache(self.cache_mb)
         self.local(np.zeros(SAMPLE_RATE // 2, dtype=np.float32))  # warm up: the first call compiles kernels
+
+    def move(self, to_cpu: bool) -> bool:
+        """The NeMo recognizer to the CPU while a render needs the GPU memory (the governor's asr_to_cpu fallback), and
+        back. Run on the recognizer's own thread, so no utterance is transcribed mid-move. False where it cannot move."""
+
+        if self.kind != "nemo":
+            return False
+        import torch
+
+        self.model = self.model.to("cpu" if to_cpu else "cuda")
+        if to_cpu:
+            torch.cuda.empty_cache()
+        return True
 
     def __call__(self, audio: np.ndarray) -> str:
         if self.server:
@@ -270,7 +296,12 @@ CAMERA = ("[This picture is from the user's camera, looking at them: it shows th
 
 
 class Brain:
-    def __init__(self, spec: dict) -> None:
+    """An OpenAI-compatible chat server. ``use`` (gma.registry.Registry.use for its engine) wraps every request, so the
+    supervisor loads the engine on demand, counts the request in flight and never unloads it mid-answer."""
+
+    kind = "openai"
+
+    def __init__(self, spec: dict, use=None) -> None:
         self.url = spec["url"].rstrip("/") + "/chat/completions"
         self.model = spec["model"]
         self.extra = dict(spec.get("extra", {}))
@@ -279,15 +310,27 @@ class Brain:
         if spec.get("thinking") is False:
             self.extra["chat_template_kwargs"] = {**self.extra.get("chat_template_kwargs", {}), "enable_thinking": False}
         self.client = httpx.AsyncClient(timeout=httpx.Timeout(120, connect=5))
+        self.use = use or unsupervised
 
     async def warm(self, messages: list[dict]) -> None:
         """A one-token request while the person is still speaking: wakes an idle GPU (a Metal server that has gone
         quiet takes ~250 ms more for its first token) and puts the conversation so far in the prompt cache."""
 
         try:
-            await self.client.post(self.url, json={"model": self.model, "messages": messages, **self.extra, "max_tokens": 1})
-        except httpx.HTTPError:
+            async with self.use():
+                await self.client.post(self.url, json={"model": self.model, "messages": messages, **self.extra, "max_tokens": 1})
+        except (httpx.HTTPError, RuntimeError):  # down, or held while a render has the memory: nothing to warm
             pass
+
+    async def complete(self, messages: list[dict], **settings) -> str:
+        """One whole reply (the director lane's questions): ``settings`` override the profile's extra."""
+
+        timeout = settings.pop("timeout", None)  # the Director's reasoning takes longer than a voice turn
+        body = {"model": self.model, "messages": messages, **self.extra, **settings, "stream": False}
+        async with self.use():
+            reply = await self.client.post(self.url, json=body, **({"timeout": float(timeout)} if timeout else {}))
+        reply.raise_for_status()
+        return (reply.json()["choices"][0]["message"]["content"] or "").strip()
 
     async def stream(self, messages: list[dict], image_png: str | None = None) -> AsyncIterator[str]:
         """The reply, piece by piece; with image_png (base64), the picture goes with the last user message."""
@@ -300,7 +343,7 @@ class Brain:
                 {"type": "image_url", "image_url": {"url": "data:image/png;base64," + image_png}},
                 {"type": "text", "text": CAMERA + last["content"]}]}]
         body = {"model": self.model, "messages": messages, "stream": True, **self.extra}
-        async with self.client.stream("POST", self.url, json=body) as reply:
+        async with self.use(), self.client.stream("POST", self.url, json=body) as reply:
             reply.raise_for_status()
             async for line in reply.aiter_lines():
                 if not line.startswith("data:") or line.strip() == "data: [DONE]":
@@ -396,7 +439,8 @@ def jpeg_to_png(jpeg_b64: str, width: int = 640, mirror: bool = False) -> str:
 # ---------- the voice: Drama 3 on TensorFold ----------
 
 class Voice:
-    def __init__(self, spec: dict) -> None:
+    def __init__(self, spec: dict, use=None) -> None:
+        self.use = use or unsupervised  # the engine registry's hold on the voice engine (see Brain)
         self.url = spec["url"].rstrip("/") + "/audio/speech"
         self.model = spec["model"]
         self.sample_rate = int(spec.get("sample_rate", 44_100))
@@ -447,15 +491,16 @@ class Voice:
 
         self.speaking += 1
         try:
-            for attempt in range(3):
-                stalled: list[float] = []
-                async for pcm in self.take(text, voice, stalled):
-                    yield pcm
-                if not stalled:
-                    return
-                text = unspoken(text, stalled[0], attempt)
-                if not text:
-                    return
+            async with self.use():
+                for attempt in range(3):
+                    stalled: list[float] = []
+                    async for pcm in self.take(text, voice, stalled):
+                        yield pcm
+                    if not stalled:
+                        return
+                    text = unspoken(text, stalled[0], attempt)
+                    if not text:
+                        return
         finally:
             self.speaking -= 1
 
@@ -467,8 +512,9 @@ class Voice:
             return False
         self.warming = True
         try:
-            async for _ in self.take("Mm.", voice, [], retry=False):
-                pass
+            async with self.use():
+                async for _ in self.take("Mm.", voice, [], retry=False):
+                    pass
             return True
         except Exception:
             return False

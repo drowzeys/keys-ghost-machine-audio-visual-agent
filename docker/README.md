@@ -81,3 +81,22 @@ docker run --gpus all --rm -p 8095:8095 -e VOICE_ENGINE=lite \
   -v ~/models/bolt:/models/bolt -v ~/models/cosmos3:/models/cosmos3 -v ~/models/hf-cache:/models/hf-cache \
   keys-ghost-machine
 ```
+
+## Ghost Studio
+
+`ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:1.0-beta` is Ghost Multiverse Studio's app alone
+(`docker/Dockerfile.ghost-studio`): the four pages, the voice loop, AutoPilot, the Multiverse and Live Action's own
+code, on the same base image as Boo's. It holds **no weights and no engines**, and it does not start any: every engine
+in the profile you mount must be a server that already runs, on the host or elsewhere.
+
+```sh
+docker run --gpus all --rm --network host \
+  -v ~/ghost-studio/profile.json:/profile.json:ro -v ~/ghost-studio/data:/data -v ~/models/hf-cache:/models/hf-cache \
+  ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:1.0-beta
+```
+
+Then open `http://localhost:8196/`. In the profile, give `brain`, `voice` (or `voice_lite`) and `eyes` the URLs of
+your servers and leave `engines` empty, or mark each engine `"mode": "adopt"`. `--gpus all` is for Parakeet, which
+hears inside the container. What is **not** in reach from inside the container: a managed Imagination Studio, the
+clip worker and the Live Action stage's own containers (the blocking preview, the lip sync). For those, run it
+from a checkout as the README's recipe does.

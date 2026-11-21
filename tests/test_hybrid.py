@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from gma.lanes import Lanes
 from voice_agent import pocket, server
 from test_pocket import AUDIO, Acp, Direct, Eyes, FakeOmni, Page, Voice, sent_picture, settle, with_camera
 
@@ -63,7 +64,7 @@ def hybrid(url, heard="thanks boo", brain=None, agent=None, asr_delay=0.05, eyes
                "brain": {"system": "You are Boo, the brain."},
                "voice": {"url": "http://kokoro.test/v1", "model": "kokoro-82m", "voice": "bf_emma"},
                "turn": {}, "agent": agent.name if agent else None}
-    engines = SimpleNamespace(profile=profile, asr=asr, asr_pool=ThreadPoolExecutor(1), voices={"full": voice},
+    engines = SimpleNamespace(lanes=Lanes(), video=None, profile=profile, asr=asr, asr_pool=ThreadPoolExecutor(1), voices={"full": voice},
                               voice=voice, eyes=eyes, memory=None, recall=None, d1=None, agents=agents, lookup=None,
                               pocket=pocket.Pocket(profile["pocket"]), brain=brain, vad_path="")
     page = Page()

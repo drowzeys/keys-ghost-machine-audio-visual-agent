@@ -16,6 +16,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from gma.lanes import Lanes
 from voice_agent import pocket, server
 
 
@@ -165,7 +166,7 @@ def conversation(url, heard="what is the meaning of life", agent=None, asr_delay
     profile = {"pocket": {"url": url, "model": "lfm3-omni-2b", "system": "You are Boo.", **(vision or {})},
                "voice": {"url": "http://kokoro.test/v1", "model": "kokoro-82m", "voice": "bf_emma"},
                "turn": {}, "agent": agent.name if agent else None}
-    engines = SimpleNamespace(profile=profile, asr=asr, asr_pool=ThreadPoolExecutor(1), voices={"full": voice},
+    engines = SimpleNamespace(lanes=Lanes(), video=None, profile=profile, asr=asr, asr_pool=ThreadPoolExecutor(1), voices={"full": voice},
                               voice=voice, eyes=eyes, memory=None, recall=None, d1=None, agents=agents, lookup=None,
                               pocket=pocket.Pocket(profile["pocket"]), brain=brain, vad_path="")
     page = Page()

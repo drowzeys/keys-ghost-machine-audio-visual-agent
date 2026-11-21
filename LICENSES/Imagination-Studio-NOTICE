@@ -1,0 +1,77 @@
+Imagination Studio by keys+Wasserman, powered by TensorFold (Mac + DGX Spark)
+(formerly Wasserman Slate AI Studio, built with integrated Fish Audio Drama 3)
+Copyright 2026 Keys (drowzeys) and Sam Wasserman (Wasserman Productions)
+https://github.com/drowzeys · https://wassermanproductions.com · https://github.com/wassermanproductions
+
+This product was created by Keys (drowzeys) and Sam Wasserman of Wasserman Productions. If you use, fork, or
+redistribute this software or derivative works, you must retain this NOTICE file and credit
+"Keys (github.com/drowzeys)" and "Sam Wasserman / Wasserman Productions (wassermanproductions.com)" in your
+documentation and any about/credits surface, per Section 4(d) of the Apache License 2.0.
+
+Pack: drowzeys / keys, with Wasserman Productions.
+
+This pack installs and runs other people's work. See CREDITS.md. It ships no model weights.
+
+Qwen is licensed under the Qwen RESEARCH LICENSE AGREEMENT, Copyright (c) 2026 Hangzhou Tongyi Laboratory Technology
+Co., Ltd. All Rights Reserved. Qwen-Image-2.1 and adapters derived from it may be used for non-commercial purposes
+only. Built with Qwen.
+
+MiniMax H3 is licensed under the MiniMax H3 Community License Agreement, Copyright © 2026 MiniMax. All Rights Reserved.
+The MiniMax H3 Community License limits the territories in which MiniMax H3 may be used. The 2x video decoder
+(speach1sdef178/MiniMax-H3-X2-Detail-VAE) is a derivative of MiniMax H3 under the same licence.
+
+FLUX 3 Image Klein (the FLUX3-K picture models) is licensed under the FLUX Kommunity License, Copyright (c) 2026 Black
+Forest Labs. Non-commercial use; commercial use of the outputs only for Qualifying Users (under US$5M annual revenue),
+under the licence's terms. This pack ships no FLUX 3 weights: they are downloaded from Black Forest Labs' releases
+(huggingface.co/black-forest-labs) when a user installs them with --flux3. On a Mac they run on flux3-mlx (Apache-2.0,
+felix-ab), installed in an environment of its own.
+
+MOSS-Image is licensed under the Apache License 2.0, Copyright (c) 2026 OpenMOSS. Commercial use is allowed under the
+licence's terms. This pack ships no MOSS-Image weights: they are downloaded from Comfy Org's repackaged release
+(huggingface.co/Comfy-Org/MOSS-Image, from OpenMOSS-Team/MOSS-Image-SFT) when a user installs them with --moss.
+
+Fish Audio Drama 3 is licensed under the Fish Audio Community License v1.0, Copyright (c) 2026 Fish Audio. Built with
+Fish Audio. Free for non-commercial use and for commercial use below US$500,000 annual revenue; offering speech
+generation to third parties (a Hosted Service) needs a separate licence from Fish Audio. Cloning a real person's voice
+without their consent is not allowed. This pack ships no Drama 3 weights: they are downloaded from Fish Audio's
+release (huggingface.co/fishaudio/drama-3) when a user installs them.
+
+NVIDIA Nemotron 3.5 Bolt and its LiLiCorr drafter are licensed under the OpenMDW License Agreement, version 1.1, by
+NVIDIA. Use, modification and redistribution are free, commercial use included; a distribution keeps a copy of the
+agreement and NVIDIA's copyright and origin notices. This pack ships no Bolt weights: they are downloaded from
+NVIDIA's release (huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB) when a user installs them with --bolt.
+The DGX Spark's Bolt engine is MiaAI-Lab's Nemotron-3.5-Bolt-TensorFold-DGX-Spark (MIT License, Copyright (c) 2026
+MiaAI-Lab) built on TensorFold (Apache-2.0); its notices are in THIRD_PARTY_NOTICES.md.
+
+Read these licences before downloading the weights.
+
+Engine source: TensorFold (Apache-2.0, Ash Hart and contributors) with
+- an H3 family adapted from minimax-h3-mlx (Apache-2.0, mrbizarro) and int8 kernels that follow the quantization
+  scheme of h3.c (MIT, Salvatore Sanfilippo);
+- a Qwen-Image family adapted from mflux (MIT, Filip Strand and contributors), whose qwen21 model follows Qwen and
+  Hugging Face's QwenImage21 pipeline (Apache-2.0).
+
+This product includes a port of the workflow of Slate, the prompt studio for AI filmmaking, and unchanged copies of its data files under app/static/slate/.
+Slate is Copyright 2026 Sam Wasserman, licensed under the Apache License 2.0; its NOTICE is kept at
+app/static/slate/NOTICE. Credit: Sam Wasserman (wassermanproductions.com).
+
+This product includes a Python port, modified, of the analysis of Motion Previs Studio 4.1.0
+(https://github.com/wassermanproductions/motion-previs-studio), Copyright 2026 Sam Wasserman, licensed under the Apache
+License 2.0: app/motion_worker.py, app/motion.py and app/static/motion.js, and copies of its Blender import scripts
+under app/motion_templates/. Motion Previs Studio was developed and created by Sam Wasserman for Wasserman Productions
+and Wasserman.ai; its NOTICE is kept at LICENSES/Motion-Previs-Studio-NOTICE. Third-party notices for that tab
+(MediaPipe, Depth Anything, OpenCV, ONNX Runtime) are in THIRD_PARTY_NOTICES.md.
+
+The LoRA hub's first preset is the recipe for the Wasserman 80s Horror LoRA, Copyright 2026 Sam Wasserman. Its
+weights are not part of this pack: they are downloaded from his release when a user installs them, as a Model
+Derivative of MiniMax H3 under the MiniMax H3 Community License Agreement. Credit: 80s Horror LoRA by Sam Wasserman
+(wassermanproductions.com). Powered by MiniMax H3.
+
+Graphics, Finish and LoRA training run other people's programs, each installed from its author's page and none shipped
+here: HyperFrames (Apache-2.0, HeyGen), GSAP (GreenSock's Standard "no charge" License, not open source), Playwright
+(Apache-2.0), Node.js (MIT), musubi-tuner (Apache-2.0, kohya-ss) and bitsandbytes (MIT). Tesseract (Mirage) is not open
+source: it is free under Mirage's TERMS.md, not for commercial use by a business with US$1 million or more of yearly
+revenue without Mirage's agreement, not to be redistributed, and it sends usage counts unless `tsrct telemetry disable`
+is run; Tesseract Converter is MIT. The training adapter by ostris and Comfy Org's MiniMax H3 fp16 VAE are derived from
+MiniMax H3 and fall under the MiniMax H3 Community License Agreement. Geist and Instrument Serif (SIL Open Font License
+1.1) ship in app/static/fonts with their licence texts. Licence links and details: THIRD_PARTY_NOTICES.md.

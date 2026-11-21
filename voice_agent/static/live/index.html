@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Live stage · keys Ghost Multiverse Studio</title>
+<link rel="stylesheet" href="/live/live.css">
+</head>
+<body>
+<header id="top">
+  <div class="brand" title="keys Ghost Multiverse Studio"><span class="keys">keys</span> Ghost <b>Multiverse</b> Studio</div>
+  <div id="status" aria-live="polite"></div>
+  <nav class="modes" aria-label="Mode">
+    <a href="/classic" title="The classic Ghost Machine page">Ghost Agent</a>
+    <a href="/invisible" title="The Ghost watches over everything the agents make">Multiverse Timeline</a>
+    <a href="/" title="Walk a film as a tree of choices">Multiverse Generator</a>
+    <a href="/live-action" id="navAction" title="Rehearse a scene with its cast, then call action and cut">Live Action</a>
+  </nav>
+</header>
+
+<main>
+  <nav id="mast" aria-label="Where the scene is now; click a lamp to go there">
+    <ol>
+      <li data-stage="direct"><button type="button" title="Set Scene: write the scene. Click to open the Scene box."><i></i><span>Set Scene</span></button></li>
+      <li data-stage="rehearse"><button type="button" title="Rehearse: talk to the cast and give notes. Click to go to the rehearsal."><i></i><span>Rehearse</span></button></li>
+      <li data-stage="action"><button type="button" title="Action: the run-through in real time. Click to start it."><i></i><span>Action</span></button></li>
+      <li data-stage="rolling"><button type="button" title="Rolling: a take is being filmed. Click after a cut to film the take."><i></i><span>Rolling</span></button></li>
+      <li data-stage="cut"><button type="button" title="Cut: click to stop, or to see where it was cut."><i></i><span>Cut</span></button></li>
+      <li data-stage="playback"><button type="button" title="Playback: click to watch the last take."><i></i><span>Playback</span></button></li>
+    </ol>
+  </nav>
+  <section id="screen" aria-label="The scene">
+    <div id="frame">
+      <canvas id="picture" width="640" height="480" aria-label="The scene, live"></canvas>
+      <div id="set" hidden>
+        <img id="still" alt="The reference shot">
+        <video id="idle" loop muted playsinline></video>
+        <video id="talk" loop muted playsinline></video>
+        <video id="lips" class="linefilm" playsinline></video>
+        <video id="rush" playsinline></video>
+        <video id="runfilm" muted playsinline preload="auto"></video>
+        <div id="runbar" hidden><span id="runClock"></span><span id="runCue"></span><i id="runLine"><b></b></i></div>
+        <button id="runClose" type="button" hidden title="Back to the rehearsal">Back to rehearsal</button>
+        <button id="rushClose" type="button" hidden title="Back to the rehearsal">Back to rehearsal</button>
+      </div>
+      <div id="veil"><p id="veilText">Your scene appears here.</p></div>
+      <div id="tag" aria-hidden="true"></div>
+      <div id="sign" role="status" hidden></div>
+      <div id="said" aria-live="polite"></div>
+      <div id="meter" title="How fast the picture is made against how fast it plays"></div>
+    </div>
+
+    <section id="track" hidden aria-label="What is being made and how long it takes">
+      <div id="trackHead"><span id="trackWhat"></span><span id="trackLeft"></span></div>
+      <ol id="steps"></ol>
+    </section>
+
+    <div id="crew">
+      <div id="cast" hidden aria-label="The cast: choose who you are talking to"></div>
+      <figure id="blocking" hidden title="The blocking: where the cast stand and walk, before anything is filmed. Click to enlarge.">
+        <video id="block" loop muted autoplay playsinline></video>
+        <figcaption id="blockNote"></figcaption>
+      </figure>
+    </div>
+
+    <section id="turn" data-turn="start" aria-live="polite" aria-label="Whose turn it is">
+      <span class="lamp" aria-hidden="true"></span>
+      <div class="say"><strong id="turnWord">Describe your scene</strong><span id="turnHint">Write it in the Scene box, then press Rehearse.</span></div>
+      <canvas id="wave" width="168" height="44" aria-hidden="true"></canvas>
+      <button id="mic" type="button" title="The microphone: click to leave it open and just talk; click again to close it. Or hold the space bar to speak once." aria-pressed="false">
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.9V22h2v-3.1A7 7 0 0 0 19 12z"/></svg>
+        <span id="micWord">Open microphone</span>
+      </button>
+      <div id="quality" role="group" aria-label="How the take is filmed" hidden>
+        <button type="button" data-quality="draft" title="Fast: 864x480, about a minute and a half for each 5 seconds">Draft</button>
+        <button type="button" data-quality="sharp" title="Sharp: 1376x768, about four minutes for each 5 seconds; your assistant sleeps while it films">Sharp</button>
+      </div>
+      <button id="action" type="button" class="primary" disabled title="Play the plan in real time, before anything is filmed (or say “action”)">Action</button>
+      <button id="print" type="button" class="primary" hidden title="Film it as it was just played, up to the cut (or say “render it”)">Render take</button>
+      <button id="stop" type="button" disabled title="Stop (or say “cut”)">Cut</button>
+    </section>
+
+    <form id="noteForm" autocomplete="off">
+      <input id="note" placeholder="Or type it" aria-label="A direction, or a word to the cast" enterkeyhint="send" disabled>
+      <button id="send" type="submit" disabled>Say</button>
+    </form>
+    <div id="controls" hidden>
+      <button id="take" type="button" disabled>Print the take</button>
+      <span id="clock"></span>
+    </div>
+  </section>
+
+  <aside id="side">
+    <section id="setup" aria-label="The scene to start">
+      <h2>Scene</h2>
+      <textarea id="scene" rows="7" spellcheck="true" aria-label="The scene and its cast"
+        placeholder="Describe the shot, the place and the light. Name the cast on lines of their own:&#10;&#10;Mara: a woman in her thirties, short black hair, a red raincoat&#10;Jon: a tall man in a grey coat"></textarea>
+      <div class="row">
+        <label>Seed <input id="seed" type="number" value="0" min="0" max="999999"></label>
+        <button id="example" type="button" title="Fill in an example scene">Example</button>
+        <button id="plan" type="button" class="primary" title="Plan the scene and talk to the cast first; nothing is filmed until “action”">Rehearse</button>
+        <button id="start" type="button" title="Play the scene at once as a live stream you direct while it runs: a rougher picture, no cast to talk to, no take">Start</button>
+      </div>
+      <p id="memory" class="small"></p>
+    </section>
+    <section id="board" aria-label="The plan" hidden>
+      <h2>Plan</h2>
+      <p id="opening"></p>
+      <ol id="beats"></ol>
+      <p id="cue" class="small"></p>
+    </section>
+    <section id="logbox" aria-label="What was said and directed">
+      <h2>Directions</h2>
+      <ol id="log"></ol>
+    </section>
+    <section id="takesbox" aria-label="Takes" hidden>
+      <h2>Takes</h2>
+      <ul id="takes"></ul>
+    </section>
+    <details id="credits"><summary>credits</summary><div id="clines">The live stage is made with FastFrames (Apple), Causal Forcing++, Wan 2.1 and FlashInfer; it hears with Parakeet and speaks with Kokoro; the reference shot is the Studio's keyframe and the take is MiniMax H3 (FastVideo's FastH3); the cast's lips follow their lines with MuseTalk; the blocking preview is NVIDIA MotionBricks; the open microphone listens with Silero VAD; rehearse, action and cut follow Pika Enact. The full list loads when opened (CREDITS.md).</div></details>
+  </aside>
+</main>
+<script src="/live/app.js"></script>
+</body>
+</html>

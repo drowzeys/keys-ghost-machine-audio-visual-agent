@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>keys Ghost Multiverse Studio · invisible mode</title>
+<link rel="stylesheet" href="/invisible/invisible.css">
+</head>
+<body>
+<header id="top">
+  <div class="brand" title="keys Ghost Multiverse Studio"><span class="keys">keys</span> Ghost <b>Multiverse</b> Studio</div>
+  <nav class="modes" aria-label="Mode">
+    <a href="/classic" title="The classic Ghost Machine page">Ghost Agent</a>
+    <a href="/invisible" class="on" aria-current="page" title="The Ghost watches over everything the agents make">Multiverse Timeline</a>
+    <a href="/" title="Walk a film as a tree of choices">Multiverse Generator</a>
+    <a href="/live-action" title="Rehearse a scene with its cast, then call action and cut">Live Action</a>
+  </nav>
+  <div id="stats" aria-live="polite"></div>
+</header>
+
+<section id="perch" aria-label="The Ghost, watching">
+  <div id="face"><div class="noface-dot"></div></div>
+  <div id="say-row">
+    <div id="line" aria-live="polite"></div>
+    <div class="row">
+      <button id="mic" type="button" aria-label="Talk to the Ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg><span id="micLbl">Talk</span></button>
+      <div id="searchBox">
+        <input id="q" type="search" placeholder="Search everything the agents made… (or say “find the lighthouse”)" aria-label="Search the creations" autocomplete="off" enterkeyhint="search">
+        <div id="results" hidden role="listbox" aria-label="Matches"></div>
+      </div>
+    </div>
+    <div class="row filters">
+      <span class="lbl">show</span>
+      <button type="button" class="kind on" data-kind="">all</button>
+      <button type="button" class="kind" data-kind="image">pictures</button>
+      <button type="button" class="kind" data-kind="video">clips</button>
+      <button type="button" class="kind" data-kind="audio">sound</button>
+      <button type="button" class="kind" data-kind="text">ideas</button>
+      <select id="agent" aria-label="Only one agent's creations"><option value="">every agent</option></select>
+    </div>
+  </div>
+</section>
+
+<main id="stage">
+  <div id="viewport" tabindex="0" aria-label="Everything the agents made: the first on the left, the newest on the right; forks branch below">
+    <div id="world">
+      <div id="ruler"></div>
+      <div id="bands"></div>
+      <svg id="edges" aria-hidden="true"></svg>
+      <div id="cards"></div>
+    </div>
+  </div>
+  <div id="empty" hidden>
+    <h2>Nothing to watch yet</h2>
+    <p>The Ghost watches the Multiverse films, AutoPilot and video panel runs by itself. Any agent can add its own creations:</p>
+    <pre>curl -X POST http://THIS-HOST/api/watch/creations -H 'Content-Type: application/json' \
+  -d '{"agent": "hermes", "kind": "text", "title": "a first idea", "text": "a lighthouse keeper in a storm"}'
+
+curl -X POST 'http://THIS-HOST/api/watch/upload?agent=hermes&amp;name=still.png&amp;parents=ID' --data-binary @still.png</pre>
+  </div>
+  <div id="toolbar" aria-label="View">
+    <button id="follow" type="button" class="on" title="Keep the newest in view">Newest</button>
+    <button id="zoomOut" type="button" aria-label="Zoom out">−</button>
+    <button id="zoomIn" type="button" aria-label="Zoom in">+</button>
+    <button id="fit" type="button" title="Everything at once">Fit</button>
+  </div>
+  <aside id="detail" hidden aria-live="polite"></aside>
+</main>
+
+<details id="credits"><summary>credits</summary><div id="clines">keys Ghost Multiverse Studio by keys. The full list loads when opened (CREDITS.md).</div></details>
+
+<script type="module" src="/invisible/app.js"></script>
+</body>
+</html>

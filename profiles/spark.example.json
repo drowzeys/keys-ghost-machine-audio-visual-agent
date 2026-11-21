@@ -1,13 +1,25 @@
 {
   "name": "dgx-spark",
+  "platform": "spark",
+  "studio": {
+    "src": "~/ghost-studio/studio-src",
+    "home": "~/ghost-studio/home",
+    "prefix": "~/.local/opt/tensorfold-studio",
+    "port": 7890,
+    "comfy_port": 8290,
+    "mode": "managed",
+    "start_at_launch": true,
+    "_note": "the headless Imagination Studio (gma/studio.py): its unmodified app/server.py on 127.0.0.1:7890, its own home and ComfyUI port (8290, never a worker's 8190 or 7870), the install's models read only; \"mode\": \"adopt\" uses one already running on the port"
+  },
   "asr": {
     "kind": "nemo",
-    "model": "nvidia/parakeet-tdt-0.6b-v3"
+    "model": "nvidia/parakeet-tdt-0.6b-v3",
+    "dtype": "bfloat16"
   },
   "brain": {
-    "url": "http://127.0.0.1:8091/v1",
-    "model": "nvidia-nemotron-3.5-bolt",
-    "system": "You are a friendly voice assistant. You are speaking out loud: answer in one to three short spoken sentences, plain words, no lists, no markdown, no emoji. If you did not catch something, ask. Start every reply with your mood in square brackets, one of [neutral] [happy] [excited] [curious] [thinking] [surprised] [concerned] [sad] [playful], then the words you say. You have a back agent with tools and skills. Add [deep] after the mood, and say only one short sentence that you are on it, when the request needs: doing something on the computer (checking status, files, messages, searching the web, reminders), up-to-date facts, careful thought, planning, a story or script, maths, code, or more than three sentences. Never say you cannot do something the back agent could do; hand it over instead.",
+    "url": "http://127.0.0.1:8092/v1",
+    "model": "qwen38-a",
+    "system": "You are a friendly voice assistant. You are speaking out loud: answer in one to three short spoken sentences, plain words, no lists, no markdown, no emoji. If you did not catch something, ask. Start every reply with your mood in square brackets, one of [neutral] [happy] [excited] [curious] [thinking] [surprised] [concerned] [sad] [playful], then the words you say. You have a back agent with tools and skills. Add [deep] after the mood, and say only one short sentence that you are on it, when the request needs: doing something on the computer (checking status, files, messages, searching the web, reminders), up-to-date facts, careful thought, planning, a story or script, maths, code, or more than three sentences. Never say you cannot do something the back agent could do; hand it over instead. If a request sounds misheard or contradicts itself, do not refuse it or hand it over yet: say what you think was meant and ask one short question to confirm; once it is clear, or the person corrects you, hand it over. If a report in this conversation already answers the question, answer from it yourself instead of handing it over again; anything else that needs the computer or the studio still gets [deep].",
     "extra": {
       "max_tokens": 200,
       "temperature": 0.7,
@@ -73,5 +85,538 @@
       }
     }
   },
-  "agent": "hermes"
+  "agent": "hermes",
+  "voice_engine": "lite",
+  "voice_lite": {
+    "url": "http://127.0.0.1:8197/v1",
+    "model": "kokoro-82m",
+    "sample_rate": 24000,
+    "chunks": {
+      "first_words": 5
+    },
+    "voice": "bf_emma",
+    "keep_warm": false
+  },
+  "engines": {
+    "qwen": {
+      "role": "brain",
+      "label": "Qwen3.8-27B MLX 4-bit + DFlash2 (TensorFold CUDA)",
+      "mode": "managed",
+      "port": 8092,
+      "argv": [
+        "~/gma-engines/tensorfold/bin/tensorfold-native",
+        "serve",
+        "~/gma-models/qwen38-27b-mlx4",
+        "--drafter",
+        "~/gma-models/qwen38-27b-dflash2",
+        "--name",
+        "qwen38-a",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "{port}",
+        "--no-thinking",
+        "--context",
+        "16384",
+        "--parallel",
+        "2",
+        "--prompt-cache-gib",
+        "4",
+        "--no-update-check"
+      ],
+      "env": {
+        "TENSORFOLD_MEMORY_RESERVE_GIB": "2"
+      },
+      "need_gb": 30,
+      "resident_gb": 23.5,
+      "load_s": 20,
+      "idle_s": "never",
+      "guard_gb": 8,
+      "_note": "the voice brain and AutoPilot's Director (the brain-quality bake-off: 8 of 8 films on the first try, plans on length 12 of 13); Bolt stays selectable: point brain at :8091 and put \"bolt\" back in the schedules; --context 16384 holds the largest prompts seen (3.6k voice, ~5.2k director) and saves 2 x 1.45 GiB of KV; a 4 GiB prompt cache keeps the voice and Director chats resumed (at 2 GiB or less, measured on a Mac, turns re-prefill: 3-5 s)"
+    },
+    "ghost": {
+      "role": "brain",
+      "label": "Ghost 3.8 27B, MLX 4-bit + DFlash2, with vision (TensorFold 1.2.4 CUDA)",
+      "mode": "managed",
+      "port": 8094,
+      "argv": [
+        "~/gma-engines/tensorfold-1.2.4/bin/tensorfold-native",
+        "serve",
+        "~/gma-models/ghost38-27b-mlx4",
+        "--drafter",
+        "~/gma-models/qwen38-27b-dflash2",
+        "--name",
+        "ghost-3.8-27b",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "{port}",
+        "--no-thinking",
+        "--context",
+        "16384",
+        "--parallel",
+        "2",
+        "--prompt-cache-gib",
+        "4",
+        "--no-update-check",
+        "--vision"
+      ],
+      "env": {
+        "LD_LIBRARY_PATH": "~/gma-engines/tensorfold-1.2.4/lib",
+        "TENSORFOLD_NO_UPDATE_CHECK": "1"
+      },
+      "need_gb": 30,
+      "resident_gb": 22,
+      "load_s": 60,
+      "load_timeout_s": 600,
+      "idle_s": 300,
+      "guard_gb": 15,
+      "_note": "selectable, not resident by default (QC v2, Qwen3.8 + Gemma 4 12B, is the default: the user judged its film more detailed and comprehensive, 2026-11-08). To use it: point brain at :8094 / ghost-3.8-27b, set autopilot.director and autopilot.eyes to ghost, and swap ghost in for qwen and gemma in the live and keyframe schedules. One model for the voice brain, the Director and the self-check's looker (gma/ap/qc.py GhostLooker: one picture a request, frames tiled into one sheet; a three-picture request crashed the GPU on the DGX Spark). Ghost 3.8 = Diffusion-Qwen3.8 + Nous Research Arete fusion; DFlash2 drafter by z-lab. ~21.7 GB on the GPU, loads in ~56 s, PNG only (the 1.2.4 release has no libturbojpeg / libtfvideo). On .3: the film in 17.6 min (QC v2: 25.6), the FP4 worker loaded once, seams 0.995 / 0.997."
+    },
+    "bolt": {
+      "role": "brain",
+      "label": "Nemotron 3.5 Bolt (TensorFold CUDA)",
+      "mode": "managed",
+      "port": 8091,
+      "argv": [
+        "~/gma-engines/tensorfold/bin/tensorfold-native",
+        "serve",
+        "~/gma-models/bolt",
+        "--name",
+        "nvidia-nemotron-3.5-bolt",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "{port}",
+        "--no-thinking",
+        "--context",
+        "32768",
+        "--parallel",
+        "2",
+        "--no-update-check"
+      ],
+      "need_gb": 43,
+      "resident_gb": 30.4,
+      "load_s": 40,
+      "idle_s": 300,
+      "guard_gb": 8,
+      "_note": "not resident by default (Qwen3.8-27B is the brain): loaded only when the profile's brain or autopilot.director names it"
+    },
+    "drama3": {
+      "role": "voice",
+      "label": "Fish Audio Drama 3 (TensorFold CUDA NVFP4)",
+      "mode": "managed",
+      "port": 8093,
+      "argv": [
+        "~/gma-engines/keys-tensorfold/bin/tensorfold-drama3-nvfp4",
+        "serve",
+        "~/gma-models/drama",
+        "--name",
+        "drama-3",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "{port}",
+        "--voices",
+        "~/voices/spark",
+        "--default-voice",
+        "vesper",
+        "--no-update-check"
+      ],
+      "need_gb": 12,
+      "resident_gb": 8,
+      "load_s": 20,
+      "idle_s": 900
+    },
+    "kokoro": {
+      "role": "voice",
+      "label": "Kokoro-82M",
+      "mode": "managed",
+      "port": 8197,
+      "argv": [
+        "~/gma-engines/kokoro-venv/bin/python",
+        "-m",
+        "voice_agent.kokoro_server",
+        "--backend",
+        "torch",
+        "--port",
+        "{port}"
+      ],
+      "cwd": "{repo}",
+      "need_gb": 5,
+      "resident_gb": 3.5,
+      "load_s": 10,
+      "idle_s": "never"
+    },
+    "cosmos": {
+      "role": "vision",
+      "label": "Cosmos3-Edge reasoner (TensorFold)",
+      "mode": "managed",
+      "port": 8099,
+      "argv": [
+        "~/gma-engines/keys-tensorfold/bin/tensorfold-cosmos3",
+        "serve",
+        "~/gma-models/cosmos3",
+        "--name",
+        "cosmos3",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "{port}",
+        "--no-update-check"
+      ],
+      "need_gb": 6,
+      "resident_gb": 3.4,
+      "load_s": 20,
+      "idle_s": 600,
+      "_note": "A Cosmos3 server that already runs on this machine bound to its LAN address (a Studio's, on the machine's LAN address and port 8099) does not answer on 127.0.0.1, so this managed engine would start a second one: remove this engine and point \"eyes\", \"memory.captioner\" and \"autopilot.eyes_choices.cosmos\" at that address instead (child engines are loopback only)."
+    },
+    "d1": {
+      "role": "judge",
+      "label": "d1-2B (AutoPilot's clip judge, TensorFold CUDA)",
+      "mode": "managed",
+      "port": 8412,
+      "argv": [
+        "~/gma-engines/d1/tensorfold-native",
+        "serve",
+        "~/gma-models/d1-2B",
+        "--name",
+        "d1",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "{port}",
+        "--no-update-check"
+      ],
+      "need_gb": 8,
+      "resident_gb": 5.5,
+      "load_s": 5,
+      "idle_s": 600,
+      "guard_gb": 8,
+      "_note": "drowzeys/TensorFold d1-2b-cuda-wip (38724e55) built with zig build native -Doptimize=ReleaseFast -Dnvcc=/usr/local/cuda/bin/nvcc; weights LiquidAI/d1-2B. Measured on a DGX Spark (2026-10-29): loads in 2.6 s, 5.3 GB on the GPU, a take's 8 frames and 8 questions in 0.9-1.3 s (this build reads 1024 prompt rows a pass, so the questions go in halves; 0.3 s for the 5 fixed ones). Evicted by a clip's render and loaded again for its check; kept through a keyframe."
+    },
+    "gemma": {
+      "role": "vision",
+      "label": "Gemma 4 12B (AutoPilot's eyes, vLLM)",
+      "mode": "managed",
+      "port": 8311,
+      "argv": [
+        "docker",
+        "run",
+        "--rm",
+        "--init",
+        "--name",
+        "gma-eyes-gemma",
+        "--gpus",
+        "all",
+        "--network",
+        "host",
+        "--ipc",
+        "host",
+        "-v",
+        "~/.cache/huggingface:/root/.cache/huggingface:ro",
+        "-e",
+        "HF_HUB_OFFLINE=1",
+        "vllm-audio:local",
+        "--model",
+        "google/gemma-4-12B-it-qat-w4a16-ct",
+        "--served-model-name",
+        "gemma-4-12b",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "{port}",
+        "--gpu-memory-utilization",
+        "0.3",
+        "--kv-cache-memory",
+        "4294967296",
+        "--safetensors-load-strategy",
+        "eager",
+        "--max-model-len",
+        "8192",
+        "--max-num-seqs",
+        "8",
+        "--enforce-eager",
+        "--limit-mm-per-prompt",
+        "{\"image\": 9, \"audio\": 0, \"video\": 0}"
+      ],
+      "stop_argv": [
+        "docker",
+        "rm",
+        "-f",
+        "gma-eyes-gemma"
+      ],
+      "need_gb": 24,
+      "resident_gb": 20,
+      "load_s": 70,
+      "load_timeout_s": 900,
+      "idle_s": 900,
+      "guard_gb": 15,
+      "_note": "Measured on a DGX Spark (2026-10-27): the eager safetensors read loads the weights in 8 s instead of 52-62 s (mmap page faults on GB10), a cold start in ~69 s instead of ~125 s. vLLM's sleep mode does not pay here: level 1 frees only the KV cache (the weights' CPU copy is the same unified memory), level 2 still holds ~10 GB asleep and grew ~2.5 GB a wake. The KV cache is given in bytes because the eager read's buffer counts against --gpu-memory-utilization at start-up."
+    },
+    "asr": {
+      "role": "asr",
+      "label": "Parakeet TDT 0.6B v3 (NeMo, in process)",
+      "mode": "inprocess",
+      "resident_gb": 5.4
+    },
+    "fp4": {
+      "role": "clips",
+      "label": "FastH3 V2 NVFP4 + VSA FP4 0.8 (FastVideo), the clip worker",
+      "mode": "managed",
+      "port": 8420,
+      "health": "/health",
+      "argv": [
+        "~/ghost-studio/fv-venv/bin/python",
+        "-I",
+        "{repo}/gma/fp4_worker.py",
+        "--model",
+        "~/ghost-studio/models/fastvideo/FastH3-V2-Consumer",
+        "--port",
+        "{port}",
+        "--cache",
+        "~/ghost-studio/cache"
+      ],
+      "env": {
+        "HF_HUB_OFFLINE": "1",
+        "FASTVIDEO_H3_ADALN_TABLE": "~/ghost-studio/models/fastvideo/adaln_tables_t2v_fl2va.pt"
+      },
+      "need_gb": 0,
+      "resident_gb": 40,
+      "load_s": 25,
+      "load_timeout_s": 600,
+      "idle_s": "never",
+      "guard_gb": 12,
+      "stop_wait_s": 15,
+      "_note": "every clip of Ghost Studio, and nothing else makes one (gma/clips.py, gma/fp4_worker.py): FastH3 V2 on FastVideo's FP4 sparse-attention recipe in its own minimal venv (scripts in README \"The FP4 clip worker\"). need_gb 0: a clip's memory is the render's (gma/clips.py NEED_MB), planned by the governor; kept between takes by the clip schedules, released by the keyframe's and the sound's. The AdaLN table holds the fixed ladder's modulation for text and first-frame clips, so the 26 GB of AdaLN projections are never loaded."
+    }
+  },
+  "governor": {
+    "default_schedule": "live",
+    "renderer": {
+      "width": 864,
+      "height": 480,
+      "steps": 8,
+      "picture": "auto",
+      "edit_picture": "auto",
+      "after_render": "stop",
+      "dir": "~/ghost-studio/home/ghost/renders",
+      "keyframe_wait_s": 120,
+      "_note": "keyframes are jobs of the headless Studio (picture auto = Qwen-Image where installed, else FLUX3-K Fast; edits beside references: FLUX3-K Fast first); clips are the FP4 clip worker's (engine fp4), never the Studio's. after_render stop: the Studio's ComfyUI is stopped after a keyframe or the film's sound (its /free alone left 25.5 GB held on the DGX Spark), so the clip worker has the room"
+    },
+    "schedules": {
+      "live": {
+        "label": "480p clip from the FP4 worker (Kokoro, Parakeet, Cosmos resident; the brain where it fits)",
+        "render": {
+          "preset": "fh8-480"
+        },
+        "keep": [
+          "qwen",
+          "kokoro",
+          "asr",
+          "cosmos",
+          "fp4",
+          "gemma"
+        ],
+        "fallbacks": [
+          {
+            "step": "brain_during_dit",
+            "engine": "qwen"
+          },
+          {
+            "step": "evict",
+            "engine": "gemma"
+          }
+        ],
+        "_note": "asr_to_cpu is left out: on the DGX Spark (2026-11-07) Parakeet's move to the CPU mid-film raised a CUDA illegal-address error in the app's own CUDA context, which poisons every later recognition; the brain released for the DiT pass is the fallback"
+      },
+      "sharp": {
+        "label": "sharp 1376x768, 10 s (brain evicted)",
+        "render": {
+          "width": 1376,
+          "height": 768,
+          "frames": 243
+        },
+        "keep": [
+          "kokoro",
+          "asr",
+          "fp4"
+        ]
+      },
+      "keyframe": {
+        "label": "keyframe (the judge stays; the brain too where it fits; the clip worker goes)",
+        "render": {
+          "need_gb": 31,
+          "error_gb": 4
+        },
+        "keep": [
+          "qwen",
+          "kokoro",
+          "asr",
+          "cosmos",
+          "d1",
+          "gemma"
+        ],
+        "fallbacks": [
+          {
+            "step": "evict",
+            "engine": "qwen"
+          },
+          {
+            "step": "evict",
+            "engine": "gemma"
+          }
+        ]
+      },
+      "audio": {
+        "label": "the film's sound: Drama 3 narration and MiniMax Music 3 score (brain and judge out)",
+        "render": {
+          "need_gb": 50,
+          "error_gb": 4
+        },
+        "keep": [
+          "kokoro",
+          "asr"
+        ]
+      }
+    },
+    "floor_gb": 12,
+    "memguard": {
+      "live": true,
+      "poll_s": 1,
+      "floor_gb": 20,
+      "psi_limit": 20,
+      "cooldown_s": 4,
+      "admit_wait_s": 120,
+      "kill_foreign": [],
+      "_note": "gma/memguard.py: the live guard (release the next idle model, then stop the step) and the admission's wait; kill_foreign lists command-line patterns of processes not started here that it may end (opt-in)"
+    },
+    "thermal": {
+      "gpu_max_c": 70,
+      "zone_max_c": 85,
+      "poll_s": 2,
+      "timeout_s": 300,
+      "hard_c": 88,
+      "stop_gpu_c": 90,
+      "stop_throttle_s": 10,
+      "big_load_gb": 20,
+      "_note": "gma/memguard.py: every clip, keyframe and big load (>= big_load_gb) waits for a cool GPU (soak on the DGX Spark, 2026-11-08: back-to-back FP4 clips hold the GPU at 88-89 C with growing thermal slowdown; 60 s of cooling brings it to ~60 C); the live guard stops a step at stop_gpu_c or after stop_throttle_s of hardware thermal slowdown, and the clip is made again once"
+    }
+  },
+  "video": {
+    "renderer": "studio-headless",
+    "keyframe": true,
+    "seconds": 5,
+    "max_clips": 6,
+    "dir": "~/ghost-studio/home/ghost/video"
+  },
+  "autopilot": {
+    "judge": "d1",
+    "judge_choices": {
+      "d1": {
+        "engine": "d1",
+        "url": "http://127.0.0.1:8412",
+        "registry": "d1"
+      },
+      "eyes": {
+        "engine": "eyes",
+        "_note": "the older path: Gemma 4 12B (the gemma engine, vLLM) judges with its watcher, checklist and dense windows; put \"gemma\" back in the keyframe schedule's keep when choosing it"
+      }
+    },
+    "eyes": "gemma",
+    "eyes_choices": {
+      "gemma": {
+        "engine": "gemma",
+        "url": "http://127.0.0.1:8311/v1",
+        "model": "gemma-4-12b",
+        "registry": "gemma"
+      },
+      "cosmos": {
+        "engine": "cosmos",
+        "url": "http://127.0.0.1:8099/v1",
+        "model": "cosmos3",
+        "registry": "cosmos"
+      },
+      "ghost": {
+        "engine": "ghost",
+        "url": "http://127.0.0.1:8094/v1",
+        "model": "ghost-3.8-27b",
+        "registry": "ghost"
+      }
+    },
+    "ears": {
+      "kind": "auto",
+      "whisper_python": "~/.local/opt/tensorfold-studio/venv/bin/python",
+      "whisper_model": "large-v3-turbo"
+    },
+    "director": "qwen",
+    "director_choices": {
+      "qwen": {
+        "engine": "qwen",
+        "url": "http://127.0.0.1:8092/v1",
+        "model": "qwen38-a"
+      },
+      "bolt": {
+        "engine": "bolt",
+        "url": "http://127.0.0.1:8091/v1",
+        "model": "nvidia-nemotron-3.5-bolt"
+      },
+      "ghost": {
+        "engine": "ghost",
+        "url": "http://127.0.0.1:8094/v1",
+        "model": "ghost-3.8-27b"
+      }
+    },
+    "settings": {
+      "seconds": 10,
+      "segments": 3,
+      "think_tokens": 4096,
+      "retakes": 1,
+      "keyframes": "on",
+      "narration": true,
+      "score": true,
+      "score_db": -18
+    }
+  },
+  "brain_fallback": {
+    "url": "http://127.0.0.1:8099/v1",
+    "model": "cosmos3",
+    "_note": "voice turns while the brain (Qwen3.8-27B) is out for a render (the DiT pass, a keyframe): Cosmos3-Edge, resident anyway"
+  },
+  "multiverse": {
+    "dir": "~/ghost-studio/home/ghost/multiverse",
+    "renderer": "app",
+    "writer": "brain",
+    "looker": "autopilot",
+    "landing": true,
+    "options": 3,
+    "_note": "Multiverse Generator (gma/multiverse): a film walked as a tree of choices; with \"landing\" it is the page at /"
+  },
+  "watch": {
+    "scan_s": 15,
+    "describe": true,
+    "studios": [
+      {
+        "url": "http://127.0.0.1:7890",
+        "library": "~/ghost-studio/home",
+        "name": "Imagination Studio",
+        "skip_titles": [
+          "Ghost Studio"
+        ]
+      }
+    ],
+    "_note": "Multiverse Timeline (gma/watch, the page at /invisible): the Ghost over a timeline of everything the studios listed here make"
+  },
+  "live": {
+    "render": "h3",
+    "roster": true,
+    "auto_take": true,
+    "run": "~/ghost-studio/home/ghost/live",
+    "blocking": {
+      "home": "~/motionbricks",
+      "image": "your-python-image:tag",
+      "_note": "the blocking preview: NVIDIA MotionBricks on the CPU in a no-network container. home holds src (the NVlabs/motionbricks checkout), lfs (soma_fp32.onnx and the sample .bvh clips named in gma/live/engine/mb.py) and deps (onnxruntime, numpy, pillow installed with pip --target); image is any image with python3"
+    },
+    "_note": "Live Action (gma/live, the page at /live-action): render h3 makes the reference shot with the Studio's keyframe and the take with the clip worker here; roster gives each character a close-up that answers; auto_take films what a run-through played as soon as it is cut. Optional: \"lipsync\": {\"home\": \"~/musetalk\", \"host\": \"another-machine\"} moves the close-ups' lips with MuseTalk 1.5 (gma/live/lips.py); the endless stream behind Start needs FastFrames (\"home\", \"model\", see gma/live/stage.py)"
+  }
 }
