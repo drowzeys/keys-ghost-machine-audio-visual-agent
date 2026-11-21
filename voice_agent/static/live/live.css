@@ -360,3 +360,7 @@ body.action[data-view="playback"] #takesbox, body.action[data-view="rolling"] #t
   #screen { overflow-y: auto; scrollbar-width: thin; }
   #frame, #frame.wide { min-height: min(46vh, 520px); }
 }
+
+/* Live Action offers the live stream again, beside Rehearse */
+body.action #start { display: inline-block; }
+#setup .row { flex-wrap: wrap; }

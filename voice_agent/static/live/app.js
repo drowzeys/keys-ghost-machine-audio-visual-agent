@@ -125,10 +125,10 @@ function render() {
   $("print").title = state.rendering ? "The take before this one is still being filmed" : "Film it as it was just played, up to the cut (or say “render it”)";
   $("take").disabled = !(phase === "ready" && state.frames > 4);
   $("start").disabled = $("plan").disabled = phase === "taking" || filming || !!state.rendering || (phase === "starting" && !atTable);
-  $("start").textContent = live ? "Restart" : "Start";
+  $("start").textContent = ACTION ? (live ? "Restart stream" : "Live stream") : live ? "Restart" : "Start";
   if (!live) $("meter").textContent = "";
   if (state.scene && !$("scene").value) $("scene").value = state.scene;
-  $("memory").textContent = phase !== "off" || table ? "" : ACTION ? "Rehearse makes a reference shot of the scene (about a minute), a blocking preview, and a close-up of each character, who answers you. Action films the plan; cut stops it."
+  $("memory").textContent = phase !== "off" || table ? "" : ACTION ? "Rehearse makes a reference shot of the scene (about a minute), a blocking preview, and a close-up of each character, who answers you. Action films the plan; cut stops it. " + `Live stream plays the scene at once instead, as a rougher moving picture you direct while it runs, with no cast to talk to and no take: its engine loads first (${state.load || "about a minute"}).`
     : (h3 ? "Rehearse makes a reference shot of the scene (about a minute) and then the character, who answers you. Action films the plan with the Studio’s own clip engine. " : "") +
     `Start plays a live stream instead: its engine loads first (${state.load || "about a minute"}, ${state.free_gb} GB of memory free${state.host ? " on its machine" : ""} now).`;
 
@@ -456,12 +456,13 @@ function turn() {
     else if (setting) { const t = count(); signIs = "wait"; sign = `<b>Wait</b> setting the scene up${t > 1 ? `, about ${clock(t)} left` : ""}`; }
     else if (set.still && !set.error) { signIs = "ready"; sign = "<b>Ready</b> the scene is set up"; }
   }
+  if (phase === "starting" && /picture engine/.test(state.detail || "")) { signIs = "wait"; sign = `<b>Wait</b> the live stream is loading (${safe(state.load || "about a minute")})`; }
   $("sign").hidden = !sign; $("sign").dataset.is = signIs;
   if ($("sign").innerHTML !== sign) $("sign").innerHTML = sign;
   // the mast on the left: the lit lamp is what the screen and the side panel show. It follows the scene by itself, and
   // a click on a lamp goes there (Rolling also glows while a take films behind the rehearsal)
   let stage = "direct";
-  if (phase === "running") stage = "action";
+  if (phase === "running" || phase === "live") stage = "action";   // the live stream plays as it is directed: that is action too
   else if (filming) stage = state.wrapping ? "cut" : "rolling";
   else if (table && watching) stage = "playback";
   else if (ran && $("frame").classList.contains("running")) stage = "cut";
