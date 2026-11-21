@@ -178,6 +178,7 @@ class Recognizer:
         self.server = SpeechServer(spec["server"], transport) if (spec.get("server") or {}).get("url") else None
         self.kind, self.model_id = spec["kind"], spec["model"]
         self.language = spec.get("language")
+        self.dtype = spec.get("dtype")  # NeMo: "bfloat16" or "float16" casts the model before its first use
         self.cache_mb = spec.get("mlx_cache_mb", 256)
         self.url = (spec.get("url") or "").rstrip("/")
         self.fallback = spec.get("fallback", True)
@@ -218,12 +219,12 @@ class Recognizer:
 
             _guard_nemo_nvrtc_log()
             self.model = nemo_asr.models.ASRModel.from_pretrained(self.model_id).eval()
-            if spec.get("dtype") in ("bfloat16", "float16"):
+            if self.dtype in ("bfloat16", "float16"):
                 # cast before its first use (a cast after an fp32 run crashed NeMo's TDT decoder on a GB10): measured on
                 # a DGX Spark, bf16 holds ~1.1 GB less and transcribes a short turn in 21 ms instead of 40, same words
                 import torch
 
-                self.model = self.model.to(getattr(torch, spec["dtype"]))
+                self.model = self.model.to(getattr(torch, self.dtype))
             self.model = self.model.cuda()
         else:
             raise ValueError(f"unknown recognizer kind {self.kind}")
