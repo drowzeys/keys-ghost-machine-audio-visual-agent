@@ -105,6 +105,9 @@ SYSTRAN (MIT) running OpenAI's Whisper large-v3-turbo (MIT), from another instal
 - **Parakeet TDT 0.6B v3** by NVIDIA (CC-BY-4.0): speech to text, through
   [parakeet-mlx](https://github.com/senstella/parakeet-mlx) (Apache-2.0) on the Mac and NeMo (Apache-2.0) on the DGX
   Spark.
+- **Nemotron 3.5 Transcribe 30B-A4B** (NVFP4 release) by NVIDIA (OpenMDW 1.1), served by TensorFold: optional speech
+  to text, with Parakeet taking over when it is slow or down. Its TensorFold CUDA port is by BobClawblaw (upstream
+  #1628–#1632), the NVFP4 loading ours.
 - **Nemotron 3.5 Bolt** by NVIDIA (NVIDIA Open Model License; the Studio's engine notes the OpenMDW License
   Agreement 1.1 for its 24 GB checkpoint), served by TensorFold: the front brain that answers most turns, with mood
   tags for the face. Its CUDA engine recipe is **MiaAI-Lab**'s (MIT, with ChriZzn's speed work) on TensorFold.
@@ -156,6 +159,11 @@ SYSTRAN (MIT) running OpenAI's Whisper large-v3-turbo (MIT), from another instal
   beside the agent with one small addition, `patches/eyes-of-kai-retention.patch` (set how many days it keeps while
   running). `voice_agent/memory.py` follows its question-about-the-past pattern, its caption prompt and its labelled
   prompt layout.
+- **EmbeddingGemma-2** by [Google DeepMind](https://huggingface.co/google/embeddinggemma-2): the optional memory search
+  by meaning (`voice_agent/recall.py`), embedding captions and conversation lines. Its model card states Apache-2.0
+  (the card's licence link points at the Gemma 4 licence page, labelled Apache 2.0; the repository ships no LICENSE
+  file), and says deployments must follow the Gemma Prohibited Use Policy. Its task prefixes (`task: search result |
+  query:`, `title: none | text:`) are the card's. On the DGX Spark it runs on TensorFold's CUDA engine.
 - **MediaPipe** Face Detector and Hand Landmarker by Google (Apache-2.0): face tracking for the ghost's gaze, and exact
   finger counts and which hand, in the page.
 - **Three.js** (MIT): Boo, the 3D ghost.
@@ -266,6 +274,44 @@ Every clip Ghost Studio makes comes from one resident process, and from nothing 
 - **TensorFold 1.2.4** by Ash Hart and the TensorFold contributors (Apache-2.0; its NOTICE and third-party notices ship
   with the release): the CUDA server, `--vision` (the shared Qwen-VL tower).
 - **DFlash2** drafter for Qwen3.8-27B by z-lab (Apache-2.0): speculative decoding beside Ghost 3.8 and Qwen3.8.
+
+## d1-2B assist (optional)
+
+- **d1-2B** by [Liquid AI](https://huggingface.co/LiquidAI/d1-2B) (LFM Open License v1.0): a decision model built on
+  LFM3-VL-2B that answers questions with probabilities in one pass. Boo asks it where a turn the patterns miss should
+  go and what a reply to a tool-permission question means (`voice_agent/d1.py`). The licence allows use,
+  modification and redistribution (with the licence and notices kept); commercial use is licensed only to a company
+  under US$10 million in annual revenue (non-profits are exempt for non-commercial or research use).
+- **d1-2B on TensorFold CUDA** (the bf16 LFM3 text decoder, the LFM3-VL vision tower, d1's set attention and decision
+  head) is our port, on [drowzeys/TensorFold](https://github.com/drowzeys/TensorFold) branch `d1-2b-cuda-wip`, built
+  on the open LFM3 work upstream ([ashhart/TensorFold](https://github.com/ashhart/TensorFold) #1513, #1514, #1508).
+
+## LFM3-VL-2B eyes (optional)
+
+- **LFM3-VL-2B** by [Liquid AI](https://huggingface.co/LiquidAI/LFM3-VL-2B) (LFM Open License v1.0): a small vision
+  model that can answer the camera questions instead of Cosmos3-Edge (`profiles/eyes-lfm3-vl.example.json`). The
+  licence allows use, modification and redistribution (with the licence and notices kept); commercial use is licensed
+  only to a company under US$10 million in annual revenue (non-profits are exempt for non-commercial or research use).
+- **LFM3-VL-2B on TensorFold CUDA** (LFM3's text decoder from the bf16 release with its prompt rows on cuBLASLt, the
+  LFM3-VL vision tower from the d1-2B port, images over the prompt) is our port, on
+  [drowzeys/TensorFold](https://github.com/drowzeys/TensorFold) branch `lfm3-vl-cuda`, built on the d1-2B port and
+  the open LFM3 work upstream ([ashhart/TensorFold](https://github.com/ashhart/TensorFold) #1513, #1514, #1508, and
+  #1502's LFM3-VL tower on Metal). It is checked against transformers running the checkpoint's own code.
+
+## Pocket tier (optional)
+
+- **LFM3-Omni-2B** by [Liquid AI](https://huggingface.co/LiquidAI/LFM3-Omni-2B) (LFM Open License v1.0), with its
+  bundled Liquid codec: speech (and, with `pocket.vision`, the camera's picture) in, interleaved text and speech out,
+  as the Pocket tier's ears, brain and voice in one model (`voice_agent/pocket.py`); in the hybrid mode it answers small
+  talk and camera questions, and the front brain the rest. The licence allows use, modification and redistribution (with the licence and
+  notices kept); commercial use is licensed only to a company under US$10 million in annual revenue (non-profits are
+  exempt for non-commercial or research use).
+- **LFM3-Omni-2B on TensorFold Metal** (the speech encoder, the LFM3 backbone, the depth decoder and the codec in one
+  metallib, and `lfm3-omni-generate --serve` with earlier turns as text) is our port, on
+  [drowzeys/TensorFold](https://github.com/drowzeys/TensorFold) branch `lfm3-omni-metal` (from its CUDA port,
+  `lfm3-omni-cuda`), built on the d1-2B port and the open LFM3 work upstream in
+  [ashhart/TensorFold](https://github.com/ashhart/TensorFold) (#1513, #1514, #1508), with TensorFold's prefill GEMM
+  blocks for the M5 tensor unit. TensorFold by Ash Hart is Apache-2.0.
 
 ## Earlier versions
 

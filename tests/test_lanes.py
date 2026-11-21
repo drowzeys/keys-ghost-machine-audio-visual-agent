@@ -165,6 +165,7 @@ def test_a_held_brain_turn_speaks_one_short_line(monkeypatch):
         brain = HeldBrain()
         voices = {"full": voice}
         lanes = Lanes()
+        pocket = recall = d1 = None  # Boo's optional parts, not in this profile
 
     async def go():
         talk = server.Conversation(FakeSocket(), FakeEngines())

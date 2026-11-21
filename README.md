@@ -1,9 +1,10 @@
-# Ghost Multiverse Studio
+# Ghost Multiverse Studio 1.0 beta
 
 **Ghost Machine + AutoPilot on a headless Imagination Studio.** One DGX Spark hears you, answers out loud, and makes
-pictures, clips and whole short films from what you say. This branch (`ghost-studio`) adds four modes to
+pictures, clips and whole short films from what you say. Version 1.0 beta adds four modes to
 [Ghost Machine](#keys-ghost-machine--audiovisual-agent-powered-by-tensorfold)'s voice agent, Boo. The tabs for them are
-in the top right corner of every page.
+in the top right corner of every page. It is a beta: built and run on one DGX Spark, with no one-shot installer of
+its own yet (see [Recipe](#recipe)). Boo alone, as released in v0.3.0, still installs with one command.
 
 | Mode | Page | What it is for |
 |---|---|---|
@@ -54,13 +55,16 @@ sees go to the vision model. Each local model shows whether it is loaded and how
 
 ## Updates
 
-**2026-11-20**
+**1.0 beta (2026-11-21)**
+
+- Ghost Studio is merged into `main` beside Boo's Pocket tier, d1-2B assist, memory search and Transcribe ears.
 
 - Live Action is new: the reference shot, the cast's close-ups, the blocking preview, the run-through, the take.
 - A scene written as a story, with nobody named on a line of their own, is read into a cast, an opening picture and
   timed beats.
 - The cast can be talked to during the run-through.
 - A cut films the take by itself, behind the rehearsal (`live.auto_take`), and the page plays it when it is made.
+- The live stream (an endless rougher picture whose engine takes minutes to load) stays on its own page, `/live`.
 - The status light, and the Wait / Ready / Rolling sign on the monitor.
 - The blocking preview's figures act: MotionBricks' sample motions for a fight stance, a jump, a crouch, a dance and
   sitting; punches, kicks, blasts, waves and flights drawn over them.
@@ -70,18 +74,18 @@ sees go to the vision model. Each local model shows whether it is loaded and how
   picture is now moved to the clock by hand.
 - Fixed: a camera question got no answer when the vision model was started without `--vision`.
 
-Earlier work on this branch (the FP4 clip worker, AutoPilot's self-check, the memory guard, the headless Studio, the
+Earlier work (the FP4 clip worker, AutoPilot's self-check, the memory guard, the headless Studio, the
 Multiverse tree and timeline) is in the [build notes](docs/ghost-studio-notes.md).
 
 ## Recipe
 
 Ghost Studio has been built and run on **one** DGX Spark (GB10, 128 GB, CUDA 13), by hand. There is no one-shot
-installer for this branch yet: the steps below are what that machine has, in order. Ghost Machine's own one-shot
+installer for the Studio yet: the steps below are what that machine has, in order. Ghost Machine's own one-shot
 installer, [further down](#one-shot-install), installs Boo alone.
 
-1. **This branch.**
+1. **This repository.**
    ```sh
-   git clone -b ghost-studio https://github.com/drowzeys/keys-ghost-machine-audio-visual-agent ~/ghost-studio/repo
+   git clone https://github.com/drowzeys/keys-ghost-machine-audio-visual-agent ~/ghost-studio/repo
    cd ~/ghost-studio/repo && python3 -m venv ~/ghost-studio/venv
    ~/ghost-studio/venv/bin/pip install -r requirements-spark.txt    # after a CUDA 13 build of PyTorch for aarch64
    ```
@@ -106,7 +110,7 @@ installer, [further down](#one-shot-install), installs Boo alone.
 
 ### The image
 
-`ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:ghost-studio` holds this branch's app and its Python
+`ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:1.0-beta` holds the Studio's app and its Python
 dependencies for a DGX Spark (linux/arm64): the four pages, the voice loop, AutoPilot, the Multiverse and the Live
 Action stage's own code. It holds no weights and no engines. Give it a profile whose engines are servers that already
 run (`"mode": "adopt"`, or plain URLs); see [docker/README.md](docker/README.md#ghost-studio).
@@ -450,6 +454,59 @@ when disk is short, or when you want the fastest replies on a Spark; take `both`
 **Turning it on:** `install.sh --voice lite` (or `both`), `kgm voice lite` on an install that has it, `VOICE_ENGINE=lite`
 for Docker, or by hand `./serve-kokoro.sh` then `./serve.sh profiles/mac.json lite` (see [Profiles](#profiles)).
 
+## d1-2B assist (optional, DGX Spark)
+
+[d1-2B](https://huggingface.co/LiquidAI/d1-2B) (Liquid AI, LFM Open License v1.0) is a small decision model: it answers
+questions about a short text, with calibrated probabilities, in one forward pass and without writing any text. Boo can
+ask it two things, each with a deadline, so it never holds a turn up by more than `timeout_ms`:
+
+- **Where a turn goes, when Boo's patterns can't tell.** Boo's own patterns route camera, side, finger, memory,
+  live-fact and "ask Hermes" turns instantly, and they still come first. A turn they don't place goes to d1, which picks
+  between the routes this Boo can act on and plain chat. If d1 is sure enough, the turn takes its fast path straight away
+  ("run the backup script on the server" is handed to the back agent at once, "what's behind me?" goes to the camera)
+  instead of waiting for the front brain's reply and a `[deep]` tag. Otherwise nothing changes.
+- **What a reply to a tool-permission question means**, when the yes/no/always patterns miss it ("go on then",
+  "hold off on that").
+
+Turn it on with a `d1` section in the profile (`"d1": {"url": "http://127.0.0.1:8412", "threshold": 0.8,
+"timeout_ms": 60}`), or `-e D1_URL=http://127.0.0.1:8412` in Docker. A down or slow d1 server, or an answer under
+`threshold`, leaves Boo exactly as it is without d1. `thresholds` sets a bar per route; a hand-over to the back agent
+needs 0.85 unless set, because a chat sent there waits half a minute for tools. `route` and `permission` (true by
+default) switch either part off.
+
+**Running d1-2B on TensorFold.** d1-2B runs on our CUDA port (the bf16 LFM3 text decoder, the LFM3-VL vision tower, d1's
+set attention), branch `d1-2b-cuda-wip` of [drowzeys/TensorFold](https://github.com/drowzeys/TensorFold), until it is
+accepted upstream:
+
+```sh
+git clone -b d1-2b-cuda-wip https://github.com/drowzeys/TensorFold && cd TensorFold
+zig build native -Doptimize=ReleaseFast -Dnvcc=/usr/local/cuda/bin/nvcc     # Zig 0.17.0, CUDA 13
+hf download LiquidAI/d1-2B --local-dir ~/models/d1-2B
+TF_D1_ATTENTION=causal zig-out/native/bin/tensorfold-native serve ~/models/d1-2B --host 127.0.0.1 --port 8412
+```
+
+`TF_D1_ATTENTION=causal` reads each question on its own, which routed better in our tests. About 5 GB of GPU memory.
+
+**Measured on a DGX Spark** (synthetic phrases spoken by Kokoro's stock voices, the public 0.3.0 image with this
+branch's code, Parakeet, Kokoro Lite and Bolt; other work shared the GPU):
+
+| | Without d1 | With d1 |
+|---|---|---|
+| d1's own call, per turn the patterns miss | — | 24–25 ms median (20–59 ms); gave up at 60 ms on 3 of 66 |
+| Bolt's first token, from when it is asked | 86–106 ms | 96–120 ms |
+| Back-agent requests handed over | 3 of 6 | 9 of 12 |
+| Time to the hand-over | 261 ms median | 111 ms median |
+| Chat turns kept as chat | 9 of 10 | 18 of 20 ("how do I make a video in an editor" went to the back agent) |
+| Live facts looked up | 4 of 5 | 9 of 10 |
+
+On 37 routing phrases with 7 routes, Boo's patterns alone were right on 26; patterns plus d1 at 0.85 on 29, with none
+made wrong, and at 0.8 on 30, with one chat turn sent to the back agent. d1 alone, given every phrase, was right on
+86–89%. Bolt's speed is unchanged after a d1 call (first token 62 vs 61 ms, 30 alternating requests). Permission
+replies: 11 of 16 synthetic ones read right at 0.8. One "from now on, go ahead" was read as a one-time yes, and the
+other four misses were left to Boo's usual question; no "no" was read as a yes. In the full loop, turns with d1 on ran 30–100 ms behind turns with it off beyond the call itself,
+from GPU load that changed between runs and from back-agent answers still being written; we did not find a cause in
+d1.
+
 ## See it work
 
 [![Watch the promo: Boo answering live facts, reading a desk through the camera, handing a task to Hermes and being renamed](docs/media/promo-poster.jpg)](https://github.com/drowzeys/keys-ghost-machine-audio-visual-agent/blob/main/docs/media/promo-landscape.mp4)
@@ -467,6 +524,159 @@ computer-made scene; no person appears.
 A task handed to Hermes: the card shows only the tool's name while it works, then the answer.
 
 <img src="docs/media/ui-hermes-card.png" width="640" alt="A Hermes task card showing terminal while working, then the answer">
+
+## LFM3-VL-2B eyes (optional, DGX Spark)
+
+[LFM3-VL-2B](https://huggingface.co/LiquidAI/LFM3-VL-2B) (Liquid AI, LFM Open License v1.0) can answer camera
+questions instead of Cosmos3-Edge. It runs on our TensorFold CUDA port (the LFM3-VL vision tower from the d1-2B port
+and LFM3's text decoder, bf16 as released), branch `lfm3-vl-cuda` of
+[drowzeys/TensorFold](https://github.com/drowzeys/TensorFold), until it is accepted upstream:
+
+```sh
+git clone -b lfm3-vl-cuda https://github.com/drowzeys/TensorFold && cd TensorFold
+zig build native -Doptimize=ReleaseFast -Dnvcc=/usr/local/cuda/bin/nvcc     # Zig 0.17.0, CUDA 13
+hf download LiquidAI/LFM3-VL-2B --local-dir ~/models/lfm3-vl-2b
+zig-out/native/bin/tensorfold-native serve ~/models/lfm3-vl-2b --name lfm3-vl-2b --host 127.0.0.1 --port 8413 \
+  --vision --no-thinking --context 8192 --prompt-cache-gib 1
+```
+
+Then use the `eyes` block of `profiles/eyes-lfm3-vl.example.json` in your profile (or `-e EYES_URL=http://127.0.0.1:8413/v1`
+in Docker). It sends `"thinking": false`, so the model answers without reasoning first, and greedy sampling. Cosmos3-Edge
+can keep writing the memory captions. About 7.3 GB of GPU memory (Cosmos3-Edge: about 3.5 GB).
+
+**Measured on a DGX Spark** through Boo's own eyes code (the eyes model built from the profile, the camera
+instruction and question as a camera turn sends them, the mirrored frame for sides), on 44 synthetic questions about
+generated pictures (36 camera questions, 8 left-or-right questions); thinking off, greedy, a quiet GPU:
+
+| | Cosmos3-Edge | LFM3-VL-2B |
+|---|---|---|
+| Right answers | 40 of 44 | 38 of 44 |
+| Clothing, held things, signs, counts, places | 36 of 36 | 36 of 36 |
+| Which hand (left or right) | 4 of 8 | 2 of 8 (it says "in the middle" for a held thing) |
+| Talks to you as "you" | 30 of 36 | 36 of 36 |
+| First word / whole answer, camera questions | 0.16 s / 0.30 s | 0.12 s / 0.34 s |
+| Side question, whole answer | 0.19 s | 0.36 s |
+
+Cosmos3-Edge's 4 of 8 sides counts its bare "Right." answers, which Boo now reads (2 of 8 before). LFM3-VL-2B gets
+every camera question right and always says "you", but it is weaker on sides and its answers are a little longer.
+
+## Pocket tier: LFM3-Omni-2B, speech in and speech out (optional, Mac)
+
+For small hardware, one model can do the whole front of a turn. [LFM3-Omni-2B](https://huggingface.co/LiquidAI/LFM3-Omni-2B)
+(Liquid AI, LFM Open License v1.0) hears the spoken turn itself and answers out loud, streaming its reply as text and
+24 kHz speech together, in place of Parakeet → brain → Drama 3 or Kokoro. It runs on our TensorFold Metal port, branch
+`lfm3-omni-metal` of [drowzeys/TensorFold](https://github.com/drowzeys/TensorFold), about 4.4 GB of memory:
+
+```sh
+git clone -b lfm3-omni-metal https://github.com/drowzeys/TensorFold && cd TensorFold
+zig build lfm3-omni-generate -Doptimize=ReleaseFast     # Zig 0.17.0; the Metal toolchain (xcodebuild -downloadComponent MetalToolchain)
+hf download LiquidAI/LFM3-Omni-2B --local-dir ~/models/lfm3-omni-2b
+zig-out/bin/lfm3-omni-generate --model ~/models/lfm3-omni-2b --serve 127.0.0.1:8094 \
+  --audio-temperature 0.4 --audio-repetition-penalty 1.2
+```
+
+Then start Boo with a profile that has a `pocket` block (`profiles/pocket.example.json`):
+`python -m voice_agent.server --profile profiles/pocket.json --port 8096`. A turn with `pocket` set goes like this:
+
+- **Omni answers the spoken turn at once.** Its speech is Boo's voice (played at its own 24 kHz) and its text is the
+  reply on the page and in the history. Pocket replies come several times faster than they are spoken, so the turn
+  lasts while the page plays them, and talking over Boo still stops it (barge-in hangs up on the Omni server, which
+  stops that reply). A cut reply is stored in the history as Boo stores any cut reply (`voice_agent/replies.py`):
+  what was heard, `[interrupted]` where the speech had got to, then the rest of what was written.
+- **Parakeet still writes down what you said**, beside Omni and never waited for: the transcript on the page, the
+  conversation (sent back to Omni as text turns with every request, the last `history_turns`), and hand-overs.
+- **Hand-overs work as before.** Asking for the back agent by name or for a live fact, `[deep]` in Omni's text, a reply
+  that only says "On it, ...", or one that says it can't make or do the thing asked ("I can't create a video clip")
+  hands the turn to the back agent. Its answer is spoken by the profile's `voice` (Kokoro-82M in the example), and so
+  are Boo's fixed lines (tool permission questions); a direct back agent answers once the turn is over rather than
+  in it.
+- **Kept:** voice activity, the eager start of a turn, barge-in, mood (from tags if Omni writes them, else a face from
+  the first sentence: a question looks curious, an exclamation happy), renaming, back agents and tool permissions.
+- **Left out:** keep-warm requests (the Omni server takes one request at a time, so other conversations wait for it),
+  d1-2B routing, live-fact lookups (a live fact goes to the back agent instead), and camera memory. **Camera:** with
+  `"vision": true` (an Omni server built with its vision tower) each turn goes with the camera's frame and Omni answers
+  camera questions itself (`vision_mirror`: the camera's view, the person's mirrored one, or `"sides"`, mirrored and
+  without the conversation for left-or-right questions). Without it, with `eyes` and a `brain` in the profile and the
+  camera on, Pocket waits for Parakeet's words, and a camera question goes the usual way (the eyes model answers, the
+  profile's voice speaks); without a brain (as in the example), the camera is not used and typed turns are not
+  answered.
+
+**Measured on an M5 Ultra** through Boo's own client (`voice_agent.bench`) with the 16 synthetic questions (macOS
+voices) the Mac Boo is measured with, two passes, while the full Boo kept running beside it. The back agent was
+unreachable, so hand-overs did no real work:
+
+| | Pocket (LFM3-Omni-2B) | Boo on the same Mac (Parakeet, Qwen3.8-27B, Drama 3) |
+|---|---|---|
+| Voice to voice, median | **0.19 s** | 0.38 s |
+| Voice to voice, p90 | **0.35 s** | 0.94 s |
+| Replies without speech | 0 of 32 | 0 of 32 |
+| Talking over Boo stops it after | 0.16–0.42 s, median 0.21 s (6 of 7; counts the 0.19 s of speech that makes a barge-in) | |
+| Front of the stack in memory | **≈ 7.8 GB**: Omni ≈ 4.4 GB, Parakeet and agent ≈ 3.5 GB (+ Kokoro ≈ 0.7 GB for back-agent lines) | ≈ 40 GB: brain ≈ 27 GB, Drama 3 ≈ 9.9 GB, Parakeet and agent ≈ 3.3 GB |
+
+Inside a turn, Omni's server sends its first speech 0.13–0.21 s after the request (median 0.20 s; 0.06 s
+measured alone on a quiet GPU with no conversation), and Parakeet's transcript, not waited for, takes about 0.11 s. Hand-overs: 9 of 16 turns a pass, 8 of the 12 studio tasks and the story idea; the misses were "add a
+slow push-in", "go back to the previous shot", an export that the speaker's pause split into two turns, and a
+question about an earlier script, which Omni answered by making something up. Omni's speech scores 4.43 UTMOS22
+(median of 16 replies on the TensorFold Metal port) against 4.36–4.52 for Kokoro and 4.54 for Drama 3, and its text
+matches its speech (1.5% WER).
+
+**What Pocket gives up:** a 2B model's answers. It knows less (it mixed up a crash zoom), makes up what it should
+hand over or look up, often says it can't do a task (Boo then hands it over), and can copy one of its earlier
+replies in a long conversation; it speaks in one voice only (no voice picker for its replies), and a back agent's
+answer comes in the profile's other voice.
+
+### Hybrid: Omni for small talk, the brain for the rest
+
+`"mode": "hybrid"` in the `pocket` block (with a `brain`, `profiles/pocket-hybrid.example.json`) keeps Omni's speed
+where a 2B model is enough and gives every other turn to the brain:
+
+- **Omni starts at once and is held.** Every spoken turn goes to Omni the moment it ends, its reply held back, while
+  Parakeet writes the words (about 0.1 s, about as long as Omni takes to its first audio). Small talk (every word a
+  greeting, thanks, an acknowledgement, a how-are-you or a goodbye: `pocket.small_talk`) lets Omni's reply out; a bare
+  "yes" right after Boo asked something does not (it carries the earlier turn's meaning). Anything else hangs Omni up
+  and goes to the brain, as in a Boo without Pocket: studio tasks and hand-overs (`[deep]`, "On it", asking an agent by
+  name), facts, follow-ups, the camera. `"speculate": false` asks Omni only after the words chose it (about 0.1 s
+  slower on small talk).
+- **One conversation.** Both write to the same history; Omni sees the last `history_turns` (4 in hybrid: a 2B model
+  copies its own earlier lines), the brain all of it. Omni's reply is held until its first sentence (or six words) and
+  goes to the brain instead when it repeats one of the last replies or says nothing (`pocket.repeats`,
+  `replies.degenerate`); a promise in Omni's small talk ("I'll keep at it, see you!") hands nothing over. Omni down,
+  the brain answers.
+- **One voice, nearly.** The brain's replies are spoken by the profile's `voice`. Kokoro's `af_heart` is the closest
+  stock voice to Omni's (pitch within 1.5 semitones, the nearest timbre of the 15 Kokoro voices by MFCC; `af_bella`
+  and `af_sarah` are as close by other measures), so the two models sound alike but not the same. A fast voice is done
+  long before the page has played it, so the turn lasts while the page plays and talking over Boo still stops it, and
+  a cut reply is stored where the speech had got to. The brain is kept warm while the person speaks.
+- **The camera.** With `"vision": true` (an Omni server built with its vision tower) a camera question goes to Omni
+  with the frame (a 640-wide PNG, about 300 image tokens), finger counts to the hand tracker, and with
+  `"vision_sides": "eyes"` (the default) left-or-right questions to the eyes' `sides()`; without `vision`, every
+  camera question goes to the eyes. Camera questions the eyes' word list misses ("Where am I?", "What does my sign
+  say?") are caught too (`pocket.looks`), so the brain never answers one from the conversation alone.
+
+**Measured on an M5 Ultra** through `voice_agent.bench`, synthetic voices only, while the Mac Boo and other jobs ran
+beside it (the back agent was unreachable, so hand-overs did no real work): the 16 studio questions (two passes), the
+same with 8 small-talk lines between them, a barge-in run, and the 44 synthetic camera questions of the vision
+comparison (one picture each).
+
+| | Hybrid Pocket | Pocket (Omni only) | Boo (Qwen3.8-27B; same hour) |
+|---|---|---|---|
+| Small talk, voice to voice (median / p90) | **0.23 s / 0.33 s** (Omni) | 0.19 s / 0.35 s | — |
+| Studio questions, voice to voice (median / p90) | 0.39–0.60 s / 0.62–2.5 s (brain) | 0.19 s / 0.35 s | 0.40 s / 1.4 s |
+| Studio tasks handed over (of 12 a pass) | **12, 12** | 9 | 12 |
+| Answers, 16 questions scored blind (correct / persona / nothing made up, of 32) | **30 / 30 / 30** | 9 / 6 / 23 | 29 / 29 / 30 |
+| Camera questions right (of 44) | **38** at 0.33 s (Omni sees, sides to Cosmos3) | — | 37 at 0.69 s (Cosmos3, then the brain) |
+| Talking over Boo stops it after | 0.20–0.26 s (6 of 8) | 0.16–0.42 s | |
+
+Small talk is routed to Omni 7 of 7 times it was heard, at 0.19–0.28 s; every studio question went to the brain, and
+none of Omni's small talk was handed over. Garbled questions now get a short question back instead of a guess. Omni alone sees
+faster (35 of 44 right at 0.28 s) but gets left and right wrong half the time: its which-hand answers flip with small
+changes to the prompt or the audio (identical pictures, no conversation), so those go to the eyes. Same caveats as
+above: the bench voices are macOS ones, and one of them ("Albert") is not heard as speech by the voice activity
+detector, so a few turns per run are missed.
+
+**What the hybrid gives up:** Omni's 0.19 s on every turn. A studio question now takes the brain's time (about
+twice Omni's, and the brain's first token can spike to a second or more when the Mac is busy), and the brain's
+voice is Kokoro, close to Omni's but not the same voice. Memory use is Pocket's plus the brain's.
 
 ## What happens in a turn
 
@@ -500,7 +710,8 @@ Rules that make it behave:
 - **The person in the picture is "you".** The camera model is told the picture shows the user, never itself.
 - **Selfie left and right.** Cosmos3 was trained on first-person robot cameras: it knows which side of a picture a thing
   is on, but not your sides on a face-forward camera. So the agent mirrors the frame to your own view, asks only for
-  the picture side, and says it as your side in code.
+  the picture side, and says it as your side in code. A short answer ("Left.", "on the right") counts as the picture
+  side too; "the right hand" does not, since that is the habit the mirrored question avoids.
 - **Fingers and hands come from the hand tracker**, never the camera model, which miscounts them.
 - **The back agent gets only your words** (plus camera or hand facts when used), never the front brain's lines. A reply
   that only promises to check is sent back once to answer.
@@ -562,6 +773,56 @@ guard never redraws a stream, so Boo also checks each streamed
 take itself: after 3 s under −30 dBFS it drops the quiet tail and asks for the text after the last sentence spoken
 (a new text draws a new seed). On 12 paragraphs the stalled one came back whole in one extra request, and the other
 11 were byte-identical with the check on.
+
+## Memory search by meaning (optional)
+
+With a `memory_search` section in the profile, Boo also indexes what the camera saw (each Eyes of Kai caption) and what
+was said (each heard question and Boo's spoken reply) as vectors from an OpenAI-compatible `/v1/embeddings` server.
+A turn that asks about the past ("when did I last water the plants?", "what did we say about the trip?", "where did
+I leave my keys?") is then searched by meaning across every day the index keeps, beside the caption log's time
+window, and Bolt gets the nearest entries as dated lines ("Tue 14:03, seen: …", "you said: …").
+
+```json
+"memory_search": {
+  "url": "http://127.0.0.1:8421/v1",
+  "model": "embeddinggemma-2",
+  "dimensions": 256,
+  "top_k": 6,
+  "timeout_ms": 40,
+  "days": 2,
+  "path": "~/.keys-ghost-machine/recall.jsonl"
+}
+```
+
+- **Never slower than its timeout.** A question's embedding waits at most `timeout_ms` (40 ms by default). Past
+  that, or with the server down, the turn goes on without it and Boo answers from the caption log as before. Indexing
+  runs in the background, in batches.
+- **Local and short-lived.** The index is one file on this machine. It keeps what the captions keep (the page's
+  **Memory** setting, 1 to 7 days), and older entries are erased from memory and from the file.
+- **The model.** [EmbeddingGemma-2](https://huggingface.co/google/embeddinggemma-2) (Google DeepMind) is the
+  reference. On a DGX Spark it runs natively on TensorFold's CUDA engine, from our branch until it is upstream
+  (Ash Hart is building EmbeddingGemma-2 in TensorFold, Metal first, ashhart/TensorFold#1035):
+
+  ```sh
+  git clone -b embgemma2-cuda https://github.com/drowzeys/TensorFold && cd TensorFold
+  zig build native -Dnvcc=/usr/local/cuda/bin/nvcc
+  hf download google/embeddinggemma-2 --local-dir ~/models/embeddinggemma-2
+  zig-out/native/bin/tensorfold-native serve ~/models/embeddinggemma-2 --host 127.0.0.1 --port 8421
+  ```
+
+  Any OpenAI-compatible embeddings server works. `dimensions` uses the model's Matryoshka cuts (768, 512, 256 or 128;
+  256 ranks as well as 768 here); a server that refuses `dimensions` gets full vectors, cut by Boo.
+- **Measured on a DGX Spark** (synthetic data only), with TensorFold's EmbeddingGemma-2 engine:
+  - Vectors match sentence-transformers' own bf16 run to a cosine of 0.99986 or better, at 768, 512, 256 and 128
+    dimensions.
+  - 230 entries over 7 simulated days, 30 paraphrased questions: the right entry ranked first for 26 of them, in the
+    top three for 27.
+  - A search added a median of 4.5 ms to a turn (95th percentile 6.9 ms; all 60 within 40 ms): the question's embedding
+    over HTTP plus the scan of the index.
+  - The engine against sentence-transformers on the same GB10, in alternating rounds (median, HTTP included): one
+    16-token question 5.3 ms against 20.6 ms; 32 captions (928 tokens) 21.2 ms against 37.9 ms; one 512-token text
+    20.8 ms against 27.6 ms.
+- Text only for now: captions and words, not the frames themselves.
 
 ## Settings in the page
 
@@ -708,7 +969,19 @@ ffmpeg -y -i q.wav -ac 1 -ar 16000 a.wav
 
 A profile names each engine and the turn timing:
 
-- `asr`: `parakeet-mlx` (Mac) or `nemo` (Spark) with the model id.
+- `asr`: `parakeet-mlx` (Mac) or `nemo` (Spark) with the model id. On a Mac the recognizer's MLX buffer cache is
+  capped at `mlx_cache_mb` (default 256; -1 leaves it alone): after a long utterance it otherwise keeps about 1.5 GB
+  that no later turn needs. Not on CUDA. **One Parakeet for several agents** (optional): run
+  `python -m voice_agent.asr_server --kind parakeet-mlx --model mlx-community/parakeet-tdt-0.6b-v3 --port 8192` (or
+  `--kind nemo --model nvidia/parakeet-tdt-0.6b-v3` on a Spark) and add `"url": "http://127.0.0.1:8192"` to each
+  agent's `asr`: the agents send it their utterances and keep no model of their own. An agent whose server does not
+  answer recognizes in process (its model loads on that turn) and asks the server again after `retry_s` seconds
+  (default 30); `"fallback": false` turns that off. Measured on an M5 Ultra with two agents and the same 26 synthetic
+  utterances each: 7.8 GB for two agents with their own Parakeet before the cap, 3.3 GB with the cap, 1.8 GB with
+  one shared recognizer (1.65 GB server + 0.08 GB per agent).
+  `asr.server` (optional) hears through a speech server first: Nemotron 3.5 Transcribe on TensorFold (see
+  [Nemotron 3.5 Transcribe ears](#nemotron-35-transcribe-ears-optional-dgx-spark)); when it is down, refuses or misses
+  its deadline, the Parakeet above answers (the shared one when `url` is set).
 - `brain`: the front model's URL, model name, system prompt and sampling.
 - `voice`: the Drama 3 URL, default voice, voices folder (for previews and descriptions) and `first_words` (the first
   spoken chunk is cut after this many words). `keep_warm: false` stops the warm-up requests (for an engine that starts
@@ -719,10 +992,64 @@ A profile names each engine and the turn timing:
   `voice_lite` changes the lite voice's settings (default: Kokoro-82M at `http://127.0.0.1:8197/v1`, voice `bf_emma`,
   no keep-warm).
 - `turn`: VAD timing (`eager_silence_ms` starts work early, `end_silence_ms` confirms the end of a turn).
-- `eyes`: the camera model; `memory`: Eyes of Kai's URL, the captioner and `interval_s`.
+- `eyes`: the camera model (its own `extra` sampling, else the brain's; `"thinking": false` sends
+  `enable_thinking: false`, which Cosmos3 and LFM3-VL need to answer at once); `memory`: Eyes of Kai's URL, the
+  captioner and `interval_s`.
+- `memory_search` (optional): an `/v1/embeddings` server for memory search by meaning; see
+  [Memory search by meaning](#memory-search-by-meaning-optional).
 - `agents` and `agent`: the back agents and the default one.
 - `video` (optional): the video panel (`renderer`: `studio-headless`), clip settings (`seconds`, `max_clips`,
   `keyframe`) and spoken updates ([docs/video-panel.md](docs/video-panel.md#profile)).
+- `d1` (optional): a d1-2B server's `url`, `threshold`, `thresholds`, `timeout_ms`, `route` and `permission`
+  ([d1-2B assist](#d1-2b-assist-optional-dgx-spark)).
+- `pocket` (optional): an LFM3-Omni-2B server's `url`, `model`, `system` (it should start with "Respond with
+  interleaved text and audio."), `history_turns` (default 12, 4 in hybrid) and `extra` (`audio_temperature`,
+  `audio_repetition_penalty`, `max_new`); spoken turns then go to it, and `brain` may be left out
+  ([Pocket tier](#pocket-tier-lfm3-omni-2b-speech-in-and-speech-out-optional-mac)). `mode` ("omni", the default, or
+  "hybrid": Omni for small talk, the brain for the rest), `speculate` (default true), `guard` (default true: a reply
+  that repeats an earlier one goes to the brain), `vision`, `vision_mirror`, `vision_width` and `vision_sides`
+  ([Hybrid](#hybrid-omni-for-small-talk-the-brain-for-the-rest)).
+
+## Nemotron 3.5 Transcribe ears (optional, DGX Spark)
+
+Boo can hear through [Nemotron 3.5 Transcribe](https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Transcribe-30B-A4B-NVFP4)
+(NVFP4 release) served by TensorFold's native CUDA engine, with Parakeet behind it (in process, or the shared
+recognizer when `asr.url` is set). Add `server` to the profile's `asr`:
+
+```json
+"asr": {
+  "kind": "nemo", "model": "nvidia/parakeet-tdt-0.6b-v3",
+  "server": {"url": "http://127.0.0.1:8601/v1", "model": "transcribe", "timeout_ms": 1500}
+}
+```
+
+In Docker, `-e ASR_URL=http://127.0.0.1:8601/v1` (and `ASR_MODEL`, `ASR_TIMEOUT_MS`) does the same.
+
+- Each utterance goes to the server as one 16 kHz WAV (`input_audio`), greedy, thinking off, with the model card's
+  readable-text instruction (`prompt` replaces it; the card's form with `Context terms: ...` adds names).
+- **Parakeet takes over** when the server refuses the connection, answers with an error, or misses `timeout_ms`; after
+  a refused connection or two misses in a row it is skipped for `retry_s` seconds (default 30). So you can stop the
+  Transcribe server while the GPU is busy (a long render) and Boo keeps hearing through Parakeet.
+- **From a Mac**: serve Transcribe on a Spark bound to `127.0.0.1` and reach it through an SSH tunnel (`ssh -N -L
+  8430:127.0.0.1:8430 spark`); keep the Mac's shared Parakeet in `asr.url` as the fallback and set `timeout_ms` to
+  about 700 so a busy Spark costs one short wait, not a turn.
+- **Serve it** from a TensorFold build with the NVFP4 release (our branch `transcribe-nvfp4`, not yet upstream):
+  `tensorfold-native serve NVIDIA-Nemotron-3.5-Transcribe-30B-A4B-NVFP4 --name transcribe --port 8601 --no-thinking
+  --context 4096 --parallel 1 --prompt-cache-gib 0` (about 21 GB; `--no-drafts` saves about 1 GB more but answers
+  about 100 ms slower).
+
+Measured on one DGX Spark with a test Boo (Qwen3.8-27B brain, Kokoro Lite voice), 16 synthetic utterances of 2–7 s
+(macOS voices), two passes each:
+
+| | Parakeet v3 | Transcribe NVFP4 |
+|---|---|---|
+| Speech recognition in the turn, median | 38–60 ms | 222–225 ms |
+| Voice-to-voice, median | 0.80–0.81 s | 1.04–1.14 s |
+| WER on the 16 utterances, raw / numbers normalised | 7.9% / 3.6% | 3.0% / 3.1% |
+| Its own memory | ≈ 5 GB (NeMo) | ≈ 21 GB, plus Parakeet's |
+
+Transcribe hears names and spelled-out numbers better ("Tanaka", "nine by sixteen", "ProRes") but adds about 0.2 s
+to every turn, so Parakeet stays the default.
 
 ## Limitations
 
@@ -759,11 +1086,12 @@ The code is MIT (LICENSE). Everything below keeps its own licence.
 | Nemotron 3.5 Bolt | The front brain: answers most turns, with mood tags for the face | NVIDIA | NVIDIA Open Model License | [Hugging Face](https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB) |
 | Cosmos3-Edge | Camera questions and memory captions (its reasoner tower) | NVIDIA | OpenMDW 1.1 | [Hugging Face](https://huggingface.co/nvidia/Cosmos3-Edge) |
 | Parakeet TDT 0.6B v3 | Speech to text | NVIDIA | CC-BY-4.0 | [Hugging Face](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3) |
+| Nemotron 3.5 Transcribe 30B-A4B (NVFP4) | Speech to text through a TensorFold server (optional), Parakeet behind it | NVIDIA | OpenMDW 1.1 | [Hugging Face](https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Transcribe-30B-A4B-NVFP4) |
 | parakeet-mlx | Runs Parakeet on the Mac | senstella | Apache-2.0 | [GitHub](https://github.com/senstella/parakeet-mlx) |
 | NeMo | Runs Parakeet on the DGX Spark | NVIDIA | Apache-2.0 | [GitHub](https://github.com/NVIDIA/NeMo) |
 | Drama 3 | The voice (speech synthesis); the 14 named voices are takes of its built-in voice | Fish Audio | Fish Audio Community License | [Hugging Face](https://huggingface.co/fishaudio/drama-3) |
 | drama-3-NVFP4-Pruned, NVFP4 CUDA fork and named voices | The 4-bit pruned Drama 3 checkpoint, the DGX Spark's Drama engine and `--voices` | plotarmordev | Fish Audio Community License (weights) · Apache-2.0 (engine) | [checkpoint](https://huggingface.co/plotarmordev/drama-3-NVFP4-Pruned) · [fork](https://github.com/plotarmordev/TensorFold) |
-| TensorFold | The engine for Bolt, Drama 3 and Cosmos3-Edge, on Metal and CUDA | Ash Hart | Apache-2.0 | [GitHub](https://github.com/ashhart/TensorFold) |
+| TensorFold | The engine for Bolt, Drama 3, Cosmos3-Edge and (on our ports) the LFM3 models, on Metal and CUDA | Ash Hart | Apache-2.0 | [GitHub](https://github.com/ashhart/TensorFold) |
 | Kokoro-82M | The lite voice (optional, instead of Drama 3) | hexgrad | Apache-2.0 | [Hugging Face](https://huggingface.co/hexgrad/Kokoro-82M) |
 | kokoro | Runs Kokoro-82M on PyTorch (DGX Spark) | hexgrad | Apache-2.0 | [GitHub](https://github.com/hexgrad/kokoro) |
 | mlx-audio | Runs Kokoro-82M on MLX (Mac); weights from `mlx-community/Kokoro-82M-bf16` | Prince Canuma (Blaizzy) | MIT | [GitHub](https://github.com/Blaizzy/mlx-audio) |
@@ -772,6 +1100,9 @@ The code is MIT (LICENSE). Everything below keeps its own licence.
 | espeak-ng (through phonemizer-fork and espeakng-loader) | misaki's fallback pronunciation for words its dictionary lacks | espeak-ng contributors | GPL-3.0 | [GitHub](https://github.com/espeak-ng/espeak-ng) |
 | StyleTTS 2 | The architecture Kokoro-82M is built on (with an iSTFTNet decoder) | Yinghao Aaron Li et al. | MIT | [GitHub](https://github.com/yl4579/StyleTTS2) |
 | Eyes of Kai | The continuity log: timestamped captions so Boo can answer about the past | tonyd2wild | MIT | [GitHub](https://github.com/tonyd2wild/eyes-of-kai) |
+| LFM3-Omni-2B (with its Liquid codec) | The Pocket tier (optional): hears a spoken turn and answers out loud in one model, on our TensorFold Metal port | Liquid AI | LFM Open License v1.0 (commercial use only under US$10M annual revenue) | [Hugging Face](https://huggingface.co/LiquidAI/LFM3-Omni-2B) |
+| LFM3-VL-2B | Camera questions (optional, instead of Cosmos3-Edge), on our TensorFold CUDA port | Liquid AI | LFM Open License v1.0 (commercial use only under US$10M annual revenue) | [Hugging Face](https://huggingface.co/LiquidAI/LFM3-VL-2B) |
+| EmbeddingGemma-2 | Memory search by meaning (optional): vectors of captions and conversation lines | Google DeepMind | Apache-2.0 (model card; deployments follow the Gemma Prohibited Use Policy) | [Hugging Face](https://huggingface.co/google/embeddinggemma-2) |
 | Hermes Agent | The back agent with tools and skills, over ACP | Nous Research | see repository | [GitHub](https://github.com/NousResearch/hermes-agent) |
 | qwen-audio-agent | Design inspiration: the frontstage/backstage split (a fast voice in front, a tool-using agent behind that reports back); no code from it is used | Qwen Audio team | Apache-2.0 | [GitHub](https://github.com/QwenAudio/qwen-audio-agent) |
 | RED-SNOW 5.3 Flash | The back agent's model in the reference setup (a GLM-5.3-Flash build); any OpenAI-compatible model works | RED-SNOW | see model card | — |

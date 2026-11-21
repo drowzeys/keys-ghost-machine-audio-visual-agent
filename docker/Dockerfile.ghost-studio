@@ -1,4 +1,4 @@
-# Ghost Multiverse Studio (the ghost-studio branch) for an NVIDIA DGX Spark (linux/arm64, CUDA 13): the app alone.
+# Ghost Multiverse Studio 1.0 beta for an NVIDIA DGX Spark (linux/arm64, CUDA 13): the app alone.
 # The four pages, the voice loop, AutoPilot, the Multiverse and the Live Action stage's own code, with their Python
 # dependencies. No model weights and no engines: the profile you mount names servers that already run
 # (see docker/README.md, "Ghost Studio").
@@ -17,7 +17,7 @@ COPY voice_agent ./voice_agent
 COPY profiles ./profiles
 COPY tools ./tools
 COPY LICENSES ./LICENSES
-COPY silero_vad.onnx LICENSE CREDITS.md README.md ./
+COPY silero_vad.onnx LICENSE CREDITS.md README.md VERSION ./
 
 EXPOSE 8196
 # /profile.json: your profile. /data: what the app writes (takes, the Multiverse, logs). /models/hf-cache: Parakeet.

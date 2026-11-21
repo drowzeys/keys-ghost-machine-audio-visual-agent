@@ -128,7 +128,7 @@ function render() {
   $("start").textContent = ACTION ? (live ? "Restart stream" : "Live stream") : live ? "Restart" : "Start";
   if (!live) $("meter").textContent = "";
   if (state.scene && !$("scene").value) $("scene").value = state.scene;
-  $("memory").textContent = phase !== "off" || table ? "" : ACTION ? "Rehearse makes a reference shot of the scene (about a minute), a blocking preview, and a close-up of each character, who answers you. Action films the plan; cut stops it. " + `Live stream plays the scene at once instead, as a rougher moving picture you direct while it runs, with no cast to talk to and no take: its engine loads first (${state.load || "about a minute"}).`
+  $("memory").textContent = phase !== "off" || table ? "" : ACTION ? "Rehearse makes a reference shot of the scene (about a minute), a blocking preview, and a close-up of each character, who answers you. Action plays the plan at once as stick figures with the lines spoken; cut films it."
     : (h3 ? "Rehearse makes a reference shot of the scene (about a minute) and then the character, who answers you. Action films the plan with the Studio’s own clip engine. " : "") +
     `Start plays a live stream instead: its engine loads first (${state.load || "about a minute"}, ${state.free_gb} GB of memory free${state.host ? " on its machine" : ""} now).`;
 

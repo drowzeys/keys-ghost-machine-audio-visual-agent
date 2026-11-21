@@ -199,7 +199,7 @@ def test_the_app_watches_a_multiverse_film_and_an_agents_creation(monkeypatch, t
         "watch": {"dir": str(tmp_path / "watch"), "runs": str(tmp_path / "video"), "scan_s": 0.3, "describe": True},
     }
     with TestClient(server.build(profile)) as client:
-        assert "Invisible" in client.get("/invisible").text
+        assert "Multiverse Timeline" in client.get("/invisible").text
         assert 'href="/invisible"' in client.get("/").text  # the mode switch on the Multiverse page
         assert client.get("/invisible/timeline.js").status_code == 200
         assert client.get("/invisible/../server.py").status_code == 404

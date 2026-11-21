@@ -1,12 +1,16 @@
-"""The three engines a turn goes through: speech recognition (Parakeet or Nemotron ASR), the brain (Nemotron 3.5 Bolt
+"""The three engines a turn goes through: speech recognition (Parakeet, or Nemotron 3.5 Transcribe on TensorFold with
+Parakeet behind it), the brain (Nemotron 3.5 Bolt
 on TensorFold, OpenAI-compatible chat) and the voice (Fish Audio Drama 3 on TensorFold, /v1/audio/speech streamed as
 PCM). Each is chosen by the profile (profiles/*.json), so the same agent runs on a Mac and on a DGX Spark."""
 
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import re
+import struct
+import sys
 import time
 from contextlib import aclosing, asynccontextmanager
 from typing import AsyncIterator, Callable
@@ -73,11 +77,132 @@ def _guard_nemo_nvrtc_log() -> None:
     nvrtc.nvrtcGetProgramLog = own_buffer
 
 
-class Recognizer:
-    """Text of one utterance (float32 mono at 16 kHz)."""
+# the model card's prompt for readable text: without a transcription instruction this size of speech LLM answers a spoken
+# request ("Give me a logline for...") instead of writing it down
+TRANSCRIBE_PROMPT = ("Audio transcription. Language: as spoken. Wording: omit fillers and accidental repetitions; keep the "
+                     "remaining spoken wording unchanged. Formatting: punctuation and capitalization. Output: transcript only.")
 
-    def __init__(self, spec: dict) -> None:
+
+def wav_bytes(audio: np.ndarray) -> bytes:
+    """A 16-bit PCM WAV file (mono, 16 kHz) of float32 samples."""
+    pcm = np.round(np.clip(audio, -1, 1) * 32767).astype("<i2").tobytes()
+    fmt = struct.pack("<IHHIIHH", 16, 1, 1, SAMPLE_RATE, SAMPLE_RATE * 2, 2, 16)
+    return b"RIFF" + struct.pack("<I", 36 + len(pcm)) + b"WAVEfmt " + fmt + b"data" + struct.pack("<I", len(pcm)) + pcm
+
+
+class SpeechServer:
+    """Text of one utterance from an OpenAI-compatible chat server that takes audio as input_audio parts: Nemotron 3.5
+    Transcribe on TensorFold. None when it is down, refuses or misses its deadline (timeout_ms), so the caller falls
+    back; after a refused connection, or two misses in a row, it is skipped for retry_s seconds."""
+
+    def __init__(self, spec: dict, transport: httpx.BaseTransport | None = None, clock: Callable[[], float] = time.monotonic) -> None:
+        self.url = spec["url"].rstrip("/") + "/chat/completions"
+        self.model = spec.get("model", "transcribe")
+        self.timeout = spec.get("timeout_ms", 1500) / 1000
+        self.prompt = spec.get("prompt", TRANSCRIBE_PROMPT)
+        self.retry_s = spec.get("retry_s", 30)
+        self.max_tokens = spec.get("max_tokens", 256)
+        self.client = httpx.Client(transport=transport, timeout=httpx.Timeout(self.timeout, connect=min(self.timeout, 1.0)))
+        self.clock = clock
+        self.down_until = 0.0
+        self.misses = 0
+        self.last_error: str | None = None
+
+    def _down(self, why: str) -> None:
+        self.last_error = why
+        self.down_until = self.clock() + self.retry_s
+
+    def __call__(self, audio: np.ndarray) -> str | None:
+        if self.clock() < self.down_until:
+            return None
+        body = {"model": self.model, "temperature": 0, "max_tokens": self.max_tokens,
+                "chat_template_kwargs": {"enable_thinking": False},
+                "messages": [{"role": "user", "content": [
+                    {"type": "text", "text": self.prompt},
+                    {"type": "input_audio", "input_audio": {"data": base64.b64encode(wav_bytes(audio)).decode(), "format": "wav"}}]}]}
+        try:
+            reply = self.client.post(self.url, json=body)
+        except httpx.TimeoutException:
+            self.misses += 1
+            self.last_error = "timeout"
+            if self.misses >= 2:
+                self._down("timeout twice")
+            return None
+        except httpx.HTTPError as e:  # refused, reset: the server is down or restarting
+            self._down(type(e).__name__)
+            return None
+        if reply.status_code != 200:
+            self.last_error = f"HTTP {reply.status_code}"
+            if reply.status_code >= 500:
+                self._down(self.last_error)
+            return None
+        try:
+            text = reply.json()["choices"][0]["message"]["content"]
+        except (ValueError, KeyError, IndexError, TypeError):
+            self.last_error = "bad reply"
+            return None
+        self.misses = 0
+        self.last_error = None
+        return (text or "").strip()
+
+
+def cap_mlx_cache(mb) -> None:
+    """Cap MLX's buffer cache on Apple GPUs (Metal) at ``mb`` megabytes; ``None`` or a negative value leaves it alone.
+
+    MLX keeps the buffers of finished arrays for reuse. After a long utterance Parakeet's cache holds about 1.5 GB that
+    no later call needs (measured on an M5 Ultra: a 20 s utterance, 3.15 GB footprint, 2.23 GB after clearing it). A cap
+    keeps the reuse for the usual short turns and gives the rest back. Metal only: never on MLX's CUDA backend."""
+
+    if mb is None or float(mb) < 0 or sys.platform != "darwin":
+        return
+    import mlx.core as mx
+
+    if not mx.metal.is_available():
+        return
+    setter = getattr(mx, "set_cache_limit", None) or mx.metal.set_cache_limit  # mx.metal.* before MLX 0.24
+    setter(int(float(mb) * 1024 * 1024))
+
+
+class Recognizer:
+    """Text of one utterance (float32 mono at 16 kHz).
+
+    In process by default. With ``"server"`` in the spec (a speech server such as Nemotron 3.5 Transcribe on
+    TensorFold, ``SpeechServer``), the utterance goes there first; when it is down, refuses or misses its deadline, the
+    Parakeet recognizer below answers. With ``"url"`` in the spec (``voice_agent.asr_server``), that Parakeet is a
+    recognizer shared by the agents on one machine, so they keep one copy of the model; when that server does not
+    answer, the utterance is recognized here (the model loads on the first such turn) and the server is tried again
+    after ``retry_s`` seconds. ``"fallback": false`` turns the local copy off (the turn then fails). ``where`` names
+    who gave the last text: "server", "shared" or "local"."""
+
+    def __init__(self, spec: dict, transport: httpx.BaseTransport | None = None) -> None:
+        self.server = SpeechServer(spec["server"], transport) if (spec.get("server") or {}).get("url") else None
         self.kind, self.model_id = spec["kind"], spec["model"]
+        self.language = spec.get("language")
+        self.cache_mb = spec.get("mlx_cache_mb", 256)
+        self.url = (spec.get("url") or "").rstrip("/")
+        self.fallback = spec.get("fallback", True)
+        self.retry_s = float(spec.get("retry_s", 30))
+        self.model = None
+        self.failed_at = 0.0  # when the shared recognizer last failed (0: it has not)
+        self.where = "local"  # who recognized the last utterance: "server", "shared" or "local"
+        shared = False
+        if self.url:
+            self.remote = httpx.Client(timeout=httpx.Timeout(float(spec.get("timeout_s", 10)), connect=1.0), transport=transport)
+            try:
+                self.remote.get(self.url + "/health").raise_for_status()
+                shared = True
+            except httpx.HTTPError as error:
+                if not self.fallback:
+                    raise RuntimeError(f"the shared recognizer at {self.url} does not answer: {error}") from error
+                print(f"asr: the shared recognizer at {self.url} does not answer ({error}); recognizing in process", flush=True)
+                self.failed_at = time.monotonic()
+        if not shared:
+            self.load()
+        if self.server:  # warm up the speech server too; a slow first answer is not held against it
+            self.server(np.zeros(SAMPLE_RATE // 2, dtype=np.float32))
+            self.server.misses = 0
+
+    def load(self) -> None:
         if self.kind == "parakeet-mlx":
             from parakeet_mlx import from_pretrained
             from parakeet_mlx.audio import get_logmel
@@ -102,8 +227,9 @@ class Recognizer:
             self.model = self.model.cuda()
         else:
             raise ValueError(f"unknown recognizer kind {self.kind}")
-        self.language = spec.get("language")
-        self(np.zeros(SAMPLE_RATE // 2, dtype=np.float32))  # warm up: the first call compiles kernels
+        if self.kind in ("parakeet-mlx", "mlx-audio"):
+            cap_mlx_cache(self.cache_mb)
+        self.local(np.zeros(SAMPLE_RATE // 2, dtype=np.float32))  # warm up: the first call compiles kernels
 
     def move(self, to_cpu: bool) -> bool:
         """The NeMo recognizer to the CPU while a render needs the GPU memory (the governor's asr_to_cpu fallback), and
@@ -119,6 +245,30 @@ class Recognizer:
         return True
 
     def __call__(self, audio: np.ndarray) -> str:
+        if self.server:
+            text = self.server(audio)
+            if text is not None:
+                self.where = "server"
+                return text
+        if self.url and (not self.failed_at or time.monotonic() - self.failed_at >= self.retry_s):
+            try:
+                answer = self.remote.post(self.url + "/v1/transcribe", content=np.ascontiguousarray(audio, dtype="<f4").tobytes(),
+                                          headers={"Content-Type": "application/octet-stream"},
+                                          params={"language": self.language} if self.language else None)
+                answer.raise_for_status()
+                self.failed_at, self.where = 0.0, "shared"
+                return str(answer.json()["text"]).strip()
+            except (httpx.HTTPError, ValueError, KeyError) as error:
+                if not self.fallback:
+                    raise
+                print(f"asr: the shared recognizer at {self.url} failed ({error}); recognizing in process", flush=True)
+                self.failed_at = time.monotonic()
+        if self.model is None:
+            self.load()
+        self.where = "local"
+        return self.local(audio)
+
+    def local(self, audio: np.ndarray) -> str:
         if self.kind == "parakeet-mlx":
             import mlx.core as mx
 
@@ -154,7 +304,11 @@ class Brain:
     def __init__(self, spec: dict, use=None) -> None:
         self.url = spec["url"].rstrip("/") + "/chat/completions"
         self.model = spec["model"]
-        self.extra = spec.get("extra", {})
+        self.extra = dict(spec.get("extra", {}))
+        # "thinking": false sends enable_thinking false with every request: models whose chat template thinks unless
+        # told not to (Cosmos3, LFM3-VL) otherwise spend seconds reasoning before a camera answer
+        if spec.get("thinking") is False:
+            self.extra["chat_template_kwargs"] = {**self.extra.get("chat_template_kwargs", {}), "enable_thinking": False}
         self.client = httpx.AsyncClient(timeout=httpx.Timeout(120, connect=5))
         self.use = use or unsupervised
 
@@ -207,6 +361,24 @@ WHERE = ("Someone asks about this picture: \"{q}\"\nFor each thing the question 
          "picture: on the left of the picture, on the right of the picture, or in the middle. Do not say whose left or "
          "right. One short sentence.")
 PICTURE_SIDE = re.compile(r"(?:the\s+)?(left|right)(?:\s+(?:side|half|part))?\s+of\s+the\s+(?:picture|image|frame)", re.I)
+# small camera models often answer with the side alone ("Left.", "On the right side.") or say "on the left" in a sentence
+# without "of the picture"; both are still the picture side. "the left hand", "the left of you" and the like are not.
+BARE_SIDE = re.compile(r"^\W*(?:(?:it'?s|it\s+is)\s+)?(?:(?:on|to|at)\s+)?(?:the\s+)?(left|right)(?:\s+(?:side|half|part))?\W*$", re.I)
+LOOSE_SIDE = re.compile(r"\b(?:on|to|at)\s+the\s+(left|right)(?:\s+(?:side|half|part))?\b"
+                        r"(?!\s+(?:side|half|part|hand|arm|wrist|shoulder|ear|eye|leg|foot|cheek|of)\b)", re.I)
+
+
+def picture_sides(text: str) -> str | None:
+    """The model's picture sides said as the person's own ("your left side"); None when it named no picture side."""
+
+    if PICTURE_SIDE.search(text):
+        return PICTURE_SIDE.sub(lambda m: f"your {m.group(1).lower()} side", text)
+    bare = BARE_SIDE.match(text)
+    if bare:
+        return f"On your {bare.group(1).lower()} side."
+    if LOOSE_SIDE.search(text):
+        return LOOSE_SIDE.sub(lambda m: f"on your {m.group(1).lower()} side", text)
+    return None
 
 
 async def sides(brain: "Brain", mirrored_png: str, question: str) -> str | None:
@@ -221,9 +393,7 @@ async def sides(brain: "Brain", mirrored_png: str, question: str) -> str | None:
         text = reply.json()["choices"][0]["message"]["content"].strip()
     except (httpx.HTTPError, ValueError, KeyError, IndexError):
         return None
-    if not PICTURE_SIDE.search(text):
-        return None
-    return PICTURE_SIDE.sub(lambda m: f"your {m.group(1).lower()} side", text)
+    return picture_sides(text)
 
 
 class Said:

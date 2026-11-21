@@ -299,6 +299,7 @@ def test_a_video_turn_gets_exactly_one_reply_and_the_brain_stays_quiet(tmp_path)
     engines = type("E", (), {})()
     engines.profile = {"voice": {}, "brain": {"system": "You are a friendly voice assistant."}}
     engines.brain, engines.eyes, engines.memory, engines.lookup = Brain(), None, None, None
+    engines.pocket, engines.recall, engines.d1 = None, None, None  # Boo's optional parts, not in this profile
     engines.agents, engines.voices, engines.video = {"video": agent}, {"full": Voice()}, svc
     talk = server.Conversation.__new__(server.Conversation)
     talk.e, talk.engine, talk.voice_name, talk.name, talk.agent = engines, "full", None, "Boo", None

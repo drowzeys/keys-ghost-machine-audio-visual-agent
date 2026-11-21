@@ -361,6 +361,6 @@ body.action[data-view="playback"] #takesbox, body.action[data-view="rolling"] #t
   #frame, #frame.wide { min-height: min(46vh, 520px); }
 }
 
-/* Live Action offers the live stream again, beside Rehearse */
-body.action #start { display: inline-block; }
+/* Live Action's moving picture is the run-through (the stick figures, the lines spoken, the beats as subtitles), which
+   starts at once; the live stream, whose engine takes minutes to load, stays on its own page (/live) */
 #setup .row { flex-wrap: wrap; }

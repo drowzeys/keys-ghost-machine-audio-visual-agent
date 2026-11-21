@@ -247,8 +247,11 @@ CANNOT = re.compile(r"\b((don'?t|do not|can'?t|cannot|unable to|not able to)\s+(
 
 def promised(text: str) -> bool:
     """Whether the front brain promised to do something, or said it can't (only a back agent can), without handing
-    over."""
+    over. A reply that ends in a question is not one: it asks before doing ("Let me ask: do you want it in nine by
+    sixteen?"), as the brain is told to when a request sounds misheard."""
 
+    if text.rstrip().rstrip("\"')\u201d\u2019").endswith("?"):
+        return False
     low = text.lower()
     return bool(PROMISE.search(low) or ON_IT.search(low) or CANNOT.search(low))
 
