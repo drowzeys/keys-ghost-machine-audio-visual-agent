@@ -1,7 +1,7 @@
 # Credits
 
 What Ghost Studio (Ghost Machine + AutoPilot on a headless Imagination Studio) is built from, and under which terms. It
-is a private, local fork of **Ghost Machine** by keys (drowzeys), MIT (see LICENSE), joined with **Imagination Studio**
+is a branch of **Ghost Machine** by keys (drowzeys), MIT (see LICENSE), joined with **Imagination Studio**
 (driven through its HTTP API, never copied for rendering) and its **AutoPilot** (Apache-2.0). Everything below keeps
 its own licence. The page shows the same list (its "credits" panel, `GET /api/credits`).
 
