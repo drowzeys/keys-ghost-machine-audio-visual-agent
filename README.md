@@ -1,5 +1,18 @@
 # Keys Ghost Machine — audio/visual agent, powered by [TensorFold](https://github.com/ashhart/TensorFold)
 
+## New: Ghost Multiverse Studio (the `ghost-studio` branch)
+
+[![Live Action: rehearse a scene with its cast, call action and cut, and the take is filmed and played back](https://raw.githubusercontent.com/drowzeys/keys-ghost-machine-audio-visual-agent/ghost-studio/docs/media/ghost-studio-live-rehearse.png)](https://github.com/drowzeys/keys-ghost-machine-audio-visual-agent/tree/ghost-studio#ghost-multiverse-studio)
+
+Boo with four modes on one DGX Spark: **Ghost Agent** (Boo, the camera, and the status of the back agent and the local
+models), **Multiverse Timeline**, **Multiverse Generator** (a film walked as a tree of choices) and **Live Action**
+(rehearse a scene with its cast, call "action" and "cut", and the take is filmed and played back). It lives on the
+[`ghost-studio` branch](https://github.com/drowzeys/keys-ghost-machine-audio-visual-agent/tree/ghost-studio), with its
+own README, recipe and image (`ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:ghost-studio`, the app alone: no
+weights, no engines). It is not merged into `main` yet, and it has no one-shot installer yet: everything below is Boo
+as released in v0.3.0 and later. Its clips are made with MiniMax H3, whose licence excludes the USA, the EU, the UK
+and South Korea without MiniMax's authorization; read that branch's licence section first.
+
 ## What's new in v0.3.0
 
 **TensorFold 1.1.5.** Bolt on a DGX Spark runs on the stock TensorFold 1.1.5 release, and the keys builds move to 1.1.5:
