@@ -1,4 +1,4 @@
-"""Invisible mode's HTTP side (keys Ghost Multiverse Studio), registered by one hook in voice_agent/server.py ``build``:
+"""Invisible mode's HTTP side (keys Ghost Machine Studio), registered by one hook in voice_agent/server.py ``build``:
 
     GET  /invisible                              the page: the Ghost above a timeline of everything the agents made
     GET  /invisible/{file}                       its static files (voice_agent/static/invisible/)

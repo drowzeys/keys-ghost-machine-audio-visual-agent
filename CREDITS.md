@@ -208,12 +208,12 @@ SYSTRAN (MIT) running OpenAI's Whisper large-v3-turbo (MIT), from another instal
 - **FFmpeg** (LGPL-2.1+/GPL, [ffmpeg.org](https://ffmpeg.org)): the posters, the joined film and the narration laid
   over it, used if it is installed. It is not shipped here.
 
-## keys Ghost Multiverse Studio (gma/multiverse/, voice_agent/static/multiverse/)
+## keys Ghost Machine Studio (gma/multiverse/, voice_agent/static/multiverse/)
 
 The page that starts with the Ghost and walks a film as a tree of clips: options ahead, the active timeline lit, roads
 not taken dimmed, any node a place to branch from.
 
-- **keys Ghost Multiverse Studio** by keys (drowzeys): the idea and its design, a visual decision tree of a film's
+- **keys Ghost Machine Studio** by keys (drowzeys): the idea and its design, a visual decision tree of a film's
   possible futures that the Ghost walks with you, picked by voice.
 - **Loom** by Janus (@repligate) and contributors ([socketteer/loom](https://github.com/socketteer/loom), MIT): the
   idea of a "multiverse" interface, a tree of generated continuations to read, compare and branch from; credited as an

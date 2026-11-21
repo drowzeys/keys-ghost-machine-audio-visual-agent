@@ -1,4 +1,4 @@
-// keys Ghost Multiverse Studio: the tree view's pure part (no DOM), so node can test it (tests/js/tree.test.mjs).
+// keys Ghost Machine Studio: the tree view's pure part (no DOM), so node can test it (tests/js/tree.test.mjs).
 // A film walks left to right through time: x is a node's depth, y its row; a parent sits centred on its children.
 
 export const COL_W = 330;   // one step of the film, left to right

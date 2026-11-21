@@ -1,1 +1,1 @@
-"""Invisible mode of keys Ghost Multiverse Studio: the Ghost watches over everything agents make."""
+"""Invisible mode of keys Ghost Machine Studio: the Ghost watches over everything agents make."""

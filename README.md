@@ -1,10 +1,10 @@
-# Ghost Multiverse Studio 1.0 beta
+# Ghost Machine Studio 1.0 beta
 
 **Ghost Machine + AutoPilot on a headless Imagination Studio.** One DGX Spark hears you, answers out loud, and makes
 pictures, clips and whole short films from what you say. Version 1.0 beta adds four modes to
 [Ghost Machine](#keys-ghost-machine--audiovisual-agent-powered-by-tensorfold)'s voice agent, Boo. The tabs for them are
-in the top right corner of every page. It is a beta: built and run on one DGX Spark, with no one-shot installer of
-its own yet (see [Recipe](#recipe)). Boo alone, as released in v0.3.0, still installs with one command.
+in the top right corner of every page. It is a beta, built and run on one DGX Spark; it installs with
+[one command](#one-shot-install-of-the-studio). Boo alone, as released in v0.3.0, has its own installer further down.
 
 | Mode | Page | What it is for |
 |---|---|---|
@@ -58,6 +58,9 @@ sees go to the vision model. Each local model shows whether it is loaded and how
 **1.0 beta (2026-11-21)**
 
 - Ghost Studio is merged into `main` beside Boo's Pocket tier, d1-2B assist, memory search and Transcribe ears.
+- The Studio installs with one command (`install-studio.sh`), and `gms` runs it.
+- The repository is now `ghost-machine-studio` and the pages say Ghost Machine Studio. Boo alone is on the `boo` branch,
+  which `install.sh` installs.
 
 - Live Action is new: the reference shot, the cast's close-ups, the blocking preview, the run-through, the take.
 - A scene written as a story, with nobody named on a line of their own, is read into a cast, an opening picture and
@@ -77,36 +80,50 @@ sees go to the vision model. Each local model shows whether it is loaded and how
 Earlier work (the FP4 clip worker, AutoPilot's self-check, the memory guard, the headless Studio, the
 Multiverse tree and timeline) is in the [build notes](docs/ghost-studio-notes.md).
 
-## Recipe
+## One-shot install of the Studio
 
-Ghost Studio has been built and run on **one** DGX Spark (GB10, 128 GB, CUDA 13), by hand. There is no one-shot
-installer for the Studio yet: the steps below are what that machine has, in order. Ghost Machine's own one-shot
-installer, [further down](#one-shot-install), installs Boo alone.
+On an NVIDIA DGX Spark (GB10, 128 GB, CUDA 13, Docker usable without sudo), after reading the
+[licences](#licences-and-where-it-may-be-used):
 
-1. **This repository.**
-   ```sh
-   git clone https://github.com/drowzeys/keys-ghost-machine-audio-visual-agent ~/ghost-studio/repo
-   cd ~/ghost-studio/repo && python3 -m venv ~/ghost-studio/venv
-   ~/ghost-studio/venv/bin/pip install -r requirements-spark.txt    # after a CUDA 13 build of PyTorch for aarch64
-   ```
-2. **The engines the profile names.** A brain, a voice and (for camera questions) a vision model, each any
-   OpenAI-compatible server. The example profile uses TensorFold builds of Qwen3.8-27B and Cosmos3-Edge (served with
-   `--vision`), Kokoro-82M (`serve-kokoro.sh`) and Parakeet v3 for hearing.
-3. **Imagination Studio**, installed with its own installer and left unmodified. Ghost Studio starts it headless and
-   asks it for every keyframe and for a film's sound ([build notes](docs/ghost-studio-notes.md#the-headless-studio)).
-4. **The clip worker**: a Python environment with FastVideo and the FastH3 V2 NVFP4 weights, which you download
-   yourself under their licence ([build notes](docs/ghost-studio-notes.md#the-fp4-clip-worker) has the commands).
-5. **For Live Action's blocking preview**: a checkout of [NVlabs/motionbricks](https://github.com/NVlabs/motionbricks)
-   with its ONNX model and sample motions (`git lfs pull`), and ONNX Runtime, NumPy and Pillow installed beside it
-   with `pip --target`. It runs on the CPU in a container with no network. Optional: MuseTalk 1.5 for the close-ups'
-   lips.
-6. **The profile.** Copy `profiles/spark.example.json`, point its paths at what you installed, and keep the `live`,
-   `multiverse` and `watch` sections for the modes you want.
-7. **Start it.**
-   ```sh
-   ~/ghost-studio/venv/bin/python -m voice_agent.server --profile ~/ghost-studio/profile.json --port 8196
-   ```
-   Then open `http://localhost:8196/`. The microphone and the camera need `localhost` or https.
+```sh
+curl -fsSL https://raw.githubusercontent.com/drowzeys/ghost-machine-studio/main/install-studio.sh | bash -s -- --accept-h3-license
+```
+
+Everything goes under `~/ghost-studio` (`GMS_HOME` moves it). Run it again and it picks up where it stopped. When it
+finishes, the page is `http://localhost:8196/` and `gms start | stop | restart | status | logs | update` runs it. The
+microphone and the camera need `localhost` or https.
+
+| Step | What | Disk | Time on a first run |
+|---|---|---|---|
+| 1 | This repository; Python environments for the app and for the lite voice (Kokoro-82M) | 15 GB | minutes |
+| 2 | TensorFold: the stock 1.1.8 release for the brain, the keys build for the camera model | 0.2 GB | a minute |
+| 3 | The brain (Qwen3.8-27B MLX 4-bit and its DFlash2 drafter) and the camera model (Cosmos3-Edge, converted) | 30 GB | the downloads |
+| 4 | Imagination Studio, with its own installer when it is not on the machine yet: keyframes and a film's sound | about 120 GB | an hour or more |
+| 5 | The clip worker: FastVideo at a pinned commit, its CUDA kernels built for the GPU, the FastH3 V2 NVFP4 weights, and the first-frame table made from them | 70 GB | the download, then about 15 minutes |
+| 6 | Live Action's blocking preview: NVIDIA MotionBricks, its motion model and nine sample motions, a small container image | 1 GB | minutes |
+| 7 | The profile, the `gms` command and the memory guard | | |
+
+- `--accept-h3-license` says you have read the MiniMax H3 Community License and may use H3 where you are; steps 4 and
+  5 do not run without it. `--agent-only` installs Ghost Agent alone (steps 1 to 3 and 7, no H3). `--no-live` skips
+  step 6. `--no-start` only installs.
+- Models you already have are used where they are: `GMS_QWEN_DIR`, `GMS_DRAFTER_DIR`, `GMS_COSMOS_DIR`,
+  `GMS_FASTH3_DIR`, `GMS_ADALN_TABLE`, `GMS_STUDIO_PREFIX`. `GMS_PORT_BASE` moves every port. The script's first lines
+  list every setting.
+- Step 5's table needs about 90 GB of free memory for a few minutes; the installer says so and stops if it is not
+  there, and picks up at that step when run again.
+- Hermes, when it is installed, becomes the back agent. The clip judge is the camera model (d1-2B, which judges on the
+  machine this was built on, has no released engine to install).
+
+**How it was tested (2026-11-21, one DGX Spark, into a fresh folder beside a running Studio).** Run for real: both
+Python environments, both TensorFold builds (checksums verified), FastVideo and the kernel build (1.5 minutes),
+FlashInfer's kernels, MotionBricks with its checksums, the container image, the profile and `gms`. Then the installed
+Studio was started on its own: a voice turn answered out loud, and a Live Action scene went from the reference shot
+(69 s) through the close-up, the blocking preview, a note, a cast answer and the run-through to a finished 5 s take
+(195 s after the cut); `gms stop` left nothing running. The first-frame table was made on its own and came out
+identical to the one in use. `--agent-only` was installed and answered a turn. **Not run:** the downloads of weights
+that were already on that machine (Qwen3.8-27B, the drafter, FastH3; Cosmos3-Edge's download and conversion, which is
+the step Boo's installer has always run), and Imagination Studio's own installer, which was already installed there.
+An AutoPilot film with the camera model as the judge has not been made.
 
 ### The image
 
@@ -193,9 +210,9 @@ memory-constrained hardware: a DGX Spark that shares its memory with other work,
 [requirements](#requirements). Everything else (Bolt, Cosmos3-Edge, Parakeet, Eyes of Kai, Hermes) stays the same.
 
 - **Install Lite, DGX Spark** (about 48 GB free memory):
-  `curl -fsSL https://raw.githubusercontent.com/drowzeys/keys-ghost-machine-audio-visual-agent/main/install.sh | bash -s -- --voice lite`
+  `curl -fsSL https://raw.githubusercontent.com/drowzeys/ghost-machine-studio/main/install.sh | bash -s -- --voice lite`
 - **Install Lite, Mac** (Apple silicon, macOS 26+; 96 GB comfortable, 64 GB tight): the same command,
-  `curl -fsSL https://raw.githubusercontent.com/drowzeys/keys-ghost-machine-audio-visual-agent/main/install.sh | bash -s -- --voice lite`
+  `curl -fsSL https://raw.githubusercontent.com/drowzeys/ghost-machine-studio/main/install.sh | bash -s -- --voice lite`
 - **Docker, Lite** (DGX Spark, no Drama 3 mount needed):
   ```sh
   docker run --gpus all --rm -p 8095:8095 -e VOICE_ENGINE=lite -e KAI=1 \
@@ -252,12 +269,12 @@ licence or the lowest delay.
   brain to copy.
 - The reference Mac now runs `voice_engine: both`, with the Full/Lite toggle tested live.
 
-Builds: [v0.2.2 release](https://github.com/drowzeys/keys-ghost-machine-audio-visual-agent/releases/tag/v0.2.2) ·
+Builds: [v0.2.2 release](https://github.com/drowzeys/ghost-machine-studio/releases/tag/v0.2.2) ·
 `docker pull ghcr.io/drowzeys/keys-ghost-machine-audio-visual-agent:0.2.2`
 
-<a href="https://github.com/drowzeys/keys-ghost-machine-audio-visual-agent/blob/main/docs/media/promo-45s.mp4"><img src="docs/media/promo-45s-poster.jpg" width="300" alt="Play the 46-second demo: Boo answering a live fact, reading a desk through the camera, handing a task to Hermes and being renamed"></a>
+<a href="https://github.com/drowzeys/ghost-machine-studio/blob/main/docs/media/promo-45s.mp4"><img src="docs/media/promo-45s-poster.jpg" width="300" alt="Play the 46-second demo: Boo answering a live fact, reading a desk through the camera, handing a task to Hermes and being renamed"></a>
 
-▶ [Watch the 45-second demo](https://github.com/drowzeys/keys-ghost-machine-audio-visual-agent/blob/main/docs/media/promo-45s.mp4) (phone, 46 s, pauses trimmed)
+▶ [Watch the 45-second demo](https://github.com/drowzeys/ghost-machine-studio/blob/main/docs/media/promo-45s.mp4) (phone, 46 s, pauses trimmed)
 
 **Boo** is a ghost-faced audio/visual agent you talk to in a browser. It hears you (Parakeet v3), answers out loud in
 about half a second (Nemotron 3.5 Bolt and Fish Audio Drama 3), looks through your camera (Cosmos3-Edge), counts your
@@ -324,13 +341,13 @@ to TensorFold's 8-bit format), then starts Boo. No sudo. Run it again to resume 
 **DGX Spark** (Linux, GB10, CUDA 13):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/drowzeys/keys-ghost-machine-audio-visual-agent/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/drowzeys/ghost-machine-studio/main/install.sh | bash
 ```
 
 **Mac** (Apple silicon, macOS 26+; install [Homebrew](https://brew.sh) first if you don't have Node 22):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/drowzeys/keys-ghost-machine-audio-visual-agent/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/drowzeys/ghost-machine-studio/main/install.sh | bash
 ```
 
 The same script detects the platform. The first run downloads about 55 GB (Bolt 24 GB, Drama 3 22 GB, Cosmos3-Edge
@@ -344,13 +361,13 @@ DGX Spark that shares its memory with other work or a Mac at the low end of the 
 **DGX Spark, Lite** (Linux, GB10, CUDA 13; about 48 GB free memory):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/drowzeys/keys-ghost-machine-audio-visual-agent/main/install.sh | bash -s -- --voice lite
+curl -fsSL https://raw.githubusercontent.com/drowzeys/ghost-machine-studio/main/install.sh | bash -s -- --voice lite
 ```
 
 **Mac, Lite** (Apple silicon, macOS 26+; 96 GB unified memory comfortable, 64 GB tight):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/drowzeys/keys-ghost-machine-audio-visual-agent/main/install.sh | bash -s -- --voice lite
+curl -fsSL https://raw.githubusercontent.com/drowzeys/ghost-machine-studio/main/install.sh | bash -s -- --voice lite
 ```
 
 `--voice both` installs both voices and adds a Full/Lite switch to the page; `kgm voice full|lite|both` switches later.
@@ -509,10 +526,10 @@ d1.
 
 ## See it work
 
-[![Watch the promo: Boo answering live facts, reading a desk through the camera, handing a task to Hermes and being renamed](docs/media/promo-poster.jpg)](https://github.com/drowzeys/keys-ghost-machine-audio-visual-agent/blob/main/docs/media/promo-landscape.mp4)
+[![Watch the promo: Boo answering live facts, reading a desk through the camera, handing a task to Hermes and being renamed](docs/media/promo-poster.jpg)](https://github.com/drowzeys/ghost-machine-studio/blob/main/docs/media/promo-landscape.mp4)
 
-Real recordings of the page, hands-free: [landscape, 1920×1080, 90 s](https://github.com/drowzeys/keys-ghost-machine-audio-visual-agent/blob/main/docs/media/promo-landscape.mp4) (above, the
-[phone cut, 1080×1920, 46 s](https://github.com/drowzeys/keys-ghost-machine-audio-visual-agent/blob/main/docs/media/promo-45s.mp4)). The voices are synthetic Drama 3 voices and the desk is a
+Real recordings of the page, hands-free: [landscape, 1920×1080, 90 s](https://github.com/drowzeys/ghost-machine-studio/blob/main/docs/media/promo-landscape.mp4) (above, the
+[phone cut, 1080×1920, 46 s](https://github.com/drowzeys/ghost-machine-studio/blob/main/docs/media/promo-45s.mp4)). The voices are synthetic Drama 3 voices and the desk is a
 computer-made scene; no person appears.
 
 ## Screenshots
@@ -889,7 +906,7 @@ plan for the infinity engine, is in [docs/video-panel.md](docs/video-panel.md).
 
 ## Prebuilt builds
 
-The [v0.3.0 release](https://github.com/drowzeys/keys-ghost-machine-audio-visual-agent/releases/tag/v0.3.0) has
+The [v0.3.0 release](https://github.com/drowzeys/ghost-machine-studio/releases/tag/v0.3.0) has
 unofficial community builds of TensorFold 1.1.5 with everything Boo needs that upstream does not ship yet:
 
 - `keys-boo-tensorfold-1.1.5-macos-arm64.tar.gz`: for Apple silicon, `tensorfold-native` (TensorFold 1.1.5) that
@@ -1073,7 +1090,7 @@ to every turn, so Parakeet stays the default.
 
 ## Questions and issues
 
-Please use [GitHub Issues](https://github.com/drowzeys/keys-ghost-machine-audio-visual-agent/issues).
+Please use [GitHub Issues](https://github.com/drowzeys/ghost-machine-studio/issues).
 
 ## Licence
 

@@ -1,4 +1,4 @@
-"""keys Ghost Multiverse Studio for development: the whole app (voice_agent/server.py) with stand-ins where the big
+"""keys Ghost Machine Studio for development: the whole app (voice_agent/server.py) with stand-ins where the big
 models would be, so the page, the voice loop and the tree can be exercised on any machine.
 
     python -m gma.multiverse.dev --port 8296 [--host 0.0.0.0] [--seed-demo] [--asr parakeet|none] [--voice-url URL]

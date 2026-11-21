@@ -1,4 +1,4 @@
-# Ghost Multiverse Studio 1.0 beta for an NVIDIA DGX Spark (linux/arm64, CUDA 13): the app alone.
+# Ghost Machine Studio 1.0 beta for an NVIDIA DGX Spark (linux/arm64, CUDA 13): the app alone.
 # The four pages, the voice loop, AutoPilot, the Multiverse and the Live Action stage's own code, with their Python
 # dependencies. No model weights and no engines: the profile you mount names servers that already run
 # (see docker/README.md, "Ghost Studio").

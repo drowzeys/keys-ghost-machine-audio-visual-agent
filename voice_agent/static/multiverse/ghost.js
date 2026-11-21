@@ -1,4 +1,4 @@
-// keys Ghost Multiverse Studio: the Ghost. Boo's face (Three.js), its moods and the live voice (microphone in, the
+// keys Ghost Machine Studio: the Ghost. Boo's face (Three.js), its moods and the live voice (microphone in, the
 // reply's audio out, over the app's /ws), taken from the classic page (voice_agent/static/index.html) with its
 // camera, hand tracking and video panel left out: the same protocol, the same face, the same voice handling.
 //

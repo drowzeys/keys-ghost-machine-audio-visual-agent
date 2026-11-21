@@ -1376,7 +1376,7 @@ def build(profile: dict) -> FastAPI:
 
     app = FastAPI(title="Ghost Machine + AutoPilot", lifespan=lifespan)
     engines.supervisor.routes(app)
-    if profile.get("multiverse"):  # keys Ghost Multiverse Studio (gma/multiverse): its page is "/", this one /classic
+    if profile.get("multiverse"):  # keys Ghost Machine Studio (gma/multiverse): its page is "/", this one /classic
         from gma.multiverse.routes import register as multiverse
 
         multiverse(app, engines, profile)
